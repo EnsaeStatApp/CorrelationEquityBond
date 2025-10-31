@@ -1,0 +1,158 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from hmmlearn.hmm import GaussianHMM
+from sklearn.preprocessing import StandardScaler
+import matplotlib.patches as mpatches
+import numpy as np  # Import de Numpy pour la gestion des graduations de l'axe
+
+# -----------------------------
+# 1. Chargement et préparation des données
+# -----------------------------
+# Assurez-vous que le fichier 'histretSP.xlsx' est dans le bon répertoire
+try:
+    df = pd.read_excel(
+        'histretSP.xlsx',
+        sheet_name='S&P 500 & Raw Data',
+        skiprows=1,
+        engine='openpyxl'
+    )
+except FileNotFoundError:
+    print("Erreur : Le fichier 'histretSP.xlsx' n'a pas été trouvé.")
+    print("Veuillez vérifier le chemin d'accès au fichier.")
+    exit()
+
+df.columns = [
+    'Year', 'S&P 500', 'Dividends', 'Dividend Yield', 'T.Bond rate',
+    'Return on bond', 'Aaa Bond Rate', 'Return on Aaa', 'Baa Bond Rate',
+    'Return on Baa', 'Returns on Real Estate'
+]
+
+df['Year'] = pd.to_numeric(df['Year'], errors='coerce').astype(int)
+df.set_index('Year', inplace=True)
+
+numeric_cols = ['S&P 500', 'Dividends', 'Return on bond', 'Return on Aaa', 'Return on Baa']
+df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+
+df['S&P 500 Total Return'] = (df['S&P 500'].diff() + df['Dividends']) / df['S&P 500'].shift(1)
+
+returns = df[['S&P 500 Total Return', 'Return on bond', 'Return on Aaa', 'Return on Baa']].copy()
+returns.dropna(inplace=True)
+returns = returns[~returns.index.duplicated(keep='first')]
+returns = returns.sort_index()
+
+# -----------------------------
+# 2. Standardisation
+# -----------------------------
+scaler = StandardScaler()
+returns_scaled = pd.DataFrame(scaler.fit_transform(returns), columns=returns.columns, index=returns.index)
+
+# -----------------------------
+# 3. HMM multivarié
+# -----------------------------
+n_states = 3
+model = GaussianHMM(n_components=n_states, covariance_type='full', n_iter=1000, random_state=42)
+model.fit(returns_scaled)
+
+hidden_states = model.predict(returns_scaled)
+returns_scaled['Regime'] = hidden_states
+
+# -----------------------------
+# 4. Statistiques par régime pour le tableau (AVEC CORRECTION de la durée)
+# -----------------------------
+table_data = []
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c'] # Bleu, Orange, Vert
+regime_labels = []
+
+for i in range(n_states):
+    mask = (returns_scaled['Regime'] == i)
+    mean_vals = returns_scaled[mask][['S&P 500 Total Return','Return on bond','Return on Aaa','Return on Baa']].mean()
+    
+    # Calcul des durées
+    durations = (mask.astype(int).groupby((mask.astype(int) != 1).cumsum()).sum())
+    
+    # Correction : On filtre les périodes de durée 0
+    durations_filtered = durations[durations > 0]
+    
+    # On calcule la moyenne sur les durées filtrées (réelles)
+    mean_duration = durations_filtered.mean()
+
+    table_data.append([
+        f"Régime {i+1}",
+        f"{mean_vals['S&P 500 Total Return']:.2f}",
+        f"{mean_vals['Return on bond']:.2f}",
+        f"{mean_vals['Return on Aaa']:.2f}",
+        f"{mean_vals['Return on Baa']:.2f}",
+        f"{mean_duration:.1f} ans"  # Utilisation de la variable corrigée
+    ])
+    
+    # Préparer les labels pour la légende
+    regime_labels.append(f"Régime {i+1}")
+
+columns = ["Régime", "S&P500", "T.Bond", "Aaa", "Baa", "Durée moyenne"]
+
+# -----------------------------
+# 5. Graphique + tableau + légende (AVEC AXE X DÉTAILLÉ)
+# -----------------------------
+fig, ax = plt.subplots(figsize=(16, 8))
+
+# Courbe principale : S&P 500
+ax.plot(returns_scaled.index, returns_scaled['S&P 500 Total Return'], label='S&P 500 Total Return', color='black', linewidth=1.5)
+
+# Définir les limites Y avant de tracer les fill_between
+ax.set_ylim(-3.5, 3.5) # Ajustez ces valeurs si nécessaire après un premier test
+y_min, y_max = ax.get_ylim()
+
+# Coloration des zones selon le régime
+for i in range(n_states):
+    mask = (returns_scaled['Regime'] == i)
+    ax.fill_between(
+        returns_scaled.index,
+        y_min, 
+        y_max,
+        where=mask,
+        color=colors[i],
+        alpha=0.2
+    )
+
+# Ajout de la légende pour les régimes avec patchs
+patches = [mpatches.Patch(color=colors[i], alpha=0.2, label=regime_labels[i]) for i in range(n_states)]
+all_handles = patches + [ax.lines[0]]
+ax.legend(handles=all_handles, loc='upper left', fontsize=10)
+
+# Titres et labels
+ax.set_xlabel("Année")
+ax.set_ylabel("Rendement standardisé")
+ax.set_title("Détection des régimes de marché via HMM multivarié")
+ax.grid(True, linestyle='--', alpha=0.5)
+
+
+# --- DÉBUT MODIFICATION AXE X ---
+# Récupérer les années min et max de vos données (en s'assurant que ce sont des entiers)
+start_year = int(returns_scaled.index.min()) 
+end_year = int(returns_scaled.index.max())   
+
+# Créer une liste d'années de 2 en 2
+ticks_to_show = np.arange(start_year, end_year + 2, 2) 
+
+# Appliquer ces ticks à l'axe
+ax.set_xticks(ticks_to_show)
+
+# Ajouter une rotation pour éviter que les labels ne se chevauchent
+plt.xticks(rotation=45, ha='right', fontsize=9) # 'ha' aligne le texte à droite
+# --- FIN MODIFICATION AXE X ---
+
+
+# Tableau récapitulatif sous le graphique
+table = plt.table(
+    cellText=table_data,
+    colLabels=columns,
+    cellLoc='center',
+    loc='bottom',
+    bbox=[0.0, -0.45, 1.0, 0.35]  # Espace alloué pour le tableau
+)
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+
+# Ajustement des marges pour laisser de la place au tableau
+plt.subplots_adjust(left=0.07, right=0.95, bottom=0.35, top=0.90)
+plt.show()
