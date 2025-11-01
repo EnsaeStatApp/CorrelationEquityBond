@@ -3,35 +3,49 @@ import matplotlib.pyplot as plt
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import StandardScaler
 import matplotlib.patches as mpatches
-import numpy as np  # Import de Numpy pour la gestion des graduations de l'axe
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+import warnings
 
-# -----------------------------
-# 1. Chargement et préparation des données
-# -----------------------------
-# Assurez-vous que le fichier 'histretSP.xlsx' est dans le bon répertoire
+# Ignorer les avertissements non critiques
+warnings.filterwarnings('ignore', category=UserWarning)
+
+# --- 1. CHARGEMENT DES DONNÉES FINANCIÈRES (Corrigé) ---
+file_path_excel = 'histretSP.xlsx' # Fichier Excel principal
+
 try:
     df = pd.read_excel(
-        'histretSP.xlsx',
+        file_path_excel,
         sheet_name='S&P 500 & Raw Data',
-        skiprows=1,
+        header=1, 
         engine='openpyxl'
     )
 except FileNotFoundError:
-    print("Erreur : Le fichier 'histretSP.xlsx' n'a pas été trouvé.")
-    print("Veuillez vérifier le chemin d'accès au fichier.")
+    print(f"ERREUR: Le fichier '{file_path_excel}' est introuvable.")
+    exit()
+except ValueError as e:
+    print(f"ERREUR: La feuille 'S&P 500 & Raw Data' n'a pas été trouvée dans {file_path_excel}. Erreur: {e}")
     exit()
 
-df.columns = [
-    'Year', 'S&P 500', 'Dividends', 'Dividend Yield', 'T.Bond rate',
-    'Return on bond', 'Aaa Bond Rate', 'Return on Aaa', 'Baa Bond Rate',
-    'Return on Baa', 'Returns on Real Estate'
-]
+# --- CORRECTION DES ESPACES DANS LES COLONNES ---
+# Cette ligne enlève les espaces au début et à la fin de tous les noms de colonnes
+df.columns = df.columns.str.strip() 
+# --- FIN DE LA CORRECTION ---
 
+# Les colonnes sont maintenant propres. Le reste du code fonctionnera.
 df['Year'] = pd.to_numeric(df['Year'], errors='coerce').astype(int)
 df.set_index('Year', inplace=True)
 
-numeric_cols = ['S&P 500', 'Dividends', 'Return on bond', 'Return on Aaa', 'Return on Baa']
-df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+# Cette liste fonctionnera maintenant car les colonnes de df ont été nettoyées
+required_cols = ['S&P 500', 'Dividends', 'Return on bond', 'Return on Aaa', 'Return on Baa']
+
+# (Vérification de sécurité, bien que la correction ci-dessus devrait suffire)
+if not all(col in df.columns for col in required_cols):
+    print(f"ERREUR: Colonnes manquantes. Lues: {df.columns.tolist()}")
+    print(f"Attendues: {required_cols}")
+    exit()
+
+df[required_cols] = df[required_cols].apply(pd.to_numeric, errors='coerce')
 
 df['S&P 500 Total Return'] = (df['S&P 500'].diff() + df['Dividends']) / df['S&P 500'].shift(1)
 
@@ -40,81 +54,124 @@ returns.dropna(inplace=True)
 returns = returns[~returns.index.duplicated(keep='first')]
 returns = returns.sort_index()
 
-# -----------------------------
-# 2. Standardisation
-# -----------------------------
+# --- 2. STANDARDISATION ---
 scaler = StandardScaler()
-returns_scaled = pd.DataFrame(scaler.fit_transform(returns), columns=returns.columns, index=returns.index)
+returns_scaled_np = scaler.fit_transform(returns)
+returns_scaled = pd.DataFrame(returns_scaled_np, columns=returns.columns, index=returns.index)
 
-# -----------------------------
-# 3. HMM multivarié
-# -----------------------------
+# --- 3. MODÈLE HMM ---
 n_states = 3
 model = GaussianHMM(n_components=n_states, covariance_type='full', n_iter=1000, random_state=42)
-model.fit(returns_scaled)
-
-hidden_states = model.predict(returns_scaled)
+model.fit(returns_scaled_np) # Utiliser le numpy array pour le fit
+hidden_states = model.predict(returns_scaled_np)
 returns_scaled['Regime'] = hidden_states
 
-# -----------------------------
-# 4. Statistiques par régime pour le tableau (AVEC CORRECTION de la durée)
-# -----------------------------
+# --- 4. TABLEAU DES RÉGIMES FINANCIERS ---
 table_data = []
 colors = ['#1f77b4', '#ff7f0e', '#2ca02c'] # Bleu, Orange, Vert
 regime_labels = []
 
 for i in range(n_states):
     mask = (returns_scaled['Regime'] == i)
-    mean_vals = returns_scaled[mask][['S&P 500 Total Return','Return on bond','Return on Aaa','Return on Baa']].mean()
-    
-    # Calcul des durées
+    mean_vals_scaled = returns_scaled[mask][['S&P 500 Total Return','Return on bond','Return on Aaa','Return on Baa']].mean()
     durations = (mask.astype(int).groupby((mask.astype(int) != 1).cumsum()).sum())
-    
-    # Correction : On filtre les périodes de durée 0
     durations_filtered = durations[durations > 0]
-    
-    # On calcule la moyenne sur les durées filtrées (réelles)
     mean_duration = durations_filtered.mean()
-
     table_data.append([
         f"Régime {i+1}",
-        f"{mean_vals['S&P 500 Total Return']:.2f}",
-        f"{mean_vals['Return on bond']:.2f}",
-        f"{mean_vals['Return on Aaa']:.2f}",
-        f"{mean_vals['Return on Baa']:.2f}",
-        f"{mean_duration:.1f} ans"  # Utilisation de la variable corrigée
+        f"{mean_vals_scaled['S&P 500 Total Return']:.2f}",
+        f"{mean_vals_scaled['Return on bond']:.2f}",
+        f"{mean_vals_scaled['Return on Aaa']:.2f}",
+        f"{mean_vals_scaled['Return on Baa']:.2f}",
+        f"{mean_duration:.1f} ans"
     ])
-    
-    # Préparer les labels pour la légende
     regime_labels.append(f"Régime {i+1}")
 
-columns = ["Régime", "S&P500", "T.Bond", "Aaa", "Baa", "Durée moyenne"]
+columns = ["Régime", "S&P500 (Std)", "T.Bond (Std)", "Aaa (Std)", "Baa (Std)", "Durée moyenne"]
 
-# -----------------------------
-# 5. Graphique + tableau + légende (AVEC AXE X DÉTAILLÉ)
-# -----------------------------
+# --- 4.5. ANALYSE MACROÉCONOMIQUE (Nouvelle Méthode CSV) ---
+print("\n" + "="*50)
+print("DÉBUT DE L'ANALYSE MACROÉCONOMIQUE")
+print("="*50)
+
+try:
+    # 1. Inflation (Nouveau: 'Inflation Rate.csv')
+    df_inf = pd.read_csv('Inflation Rate.csv')
+    df_inf.set_index('observation_date', inplace=True)
+    df_inf_agg = df_inf[['CPIAUCNS']].rename(columns={'CPIAUCNS': 'Inflation (%)'})
+    df_inf_agg['Inflation (%)'] = df_inf_agg['Inflation (%)'] * 100.0
+
+
+    # 2. Maisons (Nouveau: 'Home Prices.csv')
+    df_home = pd.read_csv('Home Prices.csv')
+    df_home.set_index('Date', inplace=True)
+    df_home_agg = df_home[['Chg in House Price']].rename(columns={'Chg in House Price': 'Home Price Chg (%)'})
+    df_home_agg['Home Price Chg (%)'] = df_home_agg['Home Price Chg (%)'] * 100.0
+
+
+    # 3. Or (Inchangé: depuis le .xlsx)
+    df_gold = pd.read_excel(file_path_excel, sheet_name='Gold Prices', header=0, engine='openpyxl')
+    df_gold.index = df_gold['Year'].astype(int)
+    df_gold['Gold Return (%)'] = df_gold['Price per oz'].pct_change() * 100.0
+    df_gold_agg = df_gold[['Gold Return (%)']]
+
+    # 4. Fusion
+    df_macro = df_inf_agg.join(df_home_agg, how='outer').join(df_gold_agg, how='outer')
+    analysis_df = returns_scaled.join(df_macro, how='inner')
+    analysis_df.dropna(inplace=True) 
+
+    macro_cols_to_analyze = ['Inflation (%)', 'Home Price Chg (%)', 'Gold Return (%)']
+    print(f"\n{len(analysis_df)} années communes trouvées pour l'analyse macro.")
+
+    if len(analysis_df) < 10:
+        print("AVERTISSEMENT : Pas assez de données communes (moins de 10 ans). L'analyse macro n'est pas fiable.")
+    else:
+        # 5. Méthode 1: Profilage
+        print("\n--- PROFILAGE MACROÉCONOMIQUE PAR RÉGIME ---")
+        macro_profile = analysis_df.groupby('Regime')[macro_cols_to_analyze].mean()
+        macro_profile.index = [f"Régime {i+1}" for i in macro_profile.index.astype(int)]
+        print(macro_profile.to_markdown(floatfmt=".2f"))
+
+        # 6. Méthode 2: Importance des variables
+        print("\n--- IMPORTANCE DES VARIABLES MACRO (Drivers) ---")
+        X = analysis_df[macro_cols_to_analyze]
+        y = analysis_df['Regime']
+        rf = RandomForestClassifier(n_estimators=100, random_state=42).fit(X, y)
+        importances = pd.Series(rf.feature_importances_, index=X.columns, name="Importance").sort_values(ascending=False)
+        print(importances.to_markdown(floatfmt=".3f"))
+
+except FileNotFoundError as e:
+    print(f"ERREUR MACRO : Fichier non trouvé ({e}).")
+    print("Vérifiez que 'Inflation Rate.csv', 'Home Prices.csv' et 'histretSP.xlsx' sont présents.")
+    print("L'analyse macro a été sautée.")
+except KeyError as e:
+    print(f"ERREUR MACRO : Colonne non trouvée ({e}).")
+    print("Veuillez vérifier les noms de colonnes dans vos fichiers CSV (ex: 'CPIAUCNS', 'Chg in House Price').")
+    print("L'analyse macro a été sautée.")
+except Exception as e:
+    print(f"ERREUR MACRO INATTENDUE : {e}")
+    print("L'analyse macro a été sautée.")
+
+print("="*50 + "\n")
+
+
+# --- 5. GRAPHIQUE FINAL ---
 fig, ax = plt.subplots(figsize=(16, 8))
 
-# Courbe principale : S&P 500
+# Courbe S&P 500
 ax.plot(returns_scaled.index, returns_scaled['S&P 500 Total Return'], label='S&P 500 Total Return', color='black', linewidth=1.5)
-
-# Définir les limites Y avant de tracer les fill_between
-ax.set_ylim(-3.5, 3.5) # Ajustez ces valeurs si nécessaire après un premier test
+ax.set_ylim(-3.5, 3.5) 
 y_min, y_max = ax.get_ylim()
 
-# Coloration des zones selon le régime
+# Zones de régime
 for i in range(n_states):
     mask = (returns_scaled['Regime'] == i)
     ax.fill_between(
-        returns_scaled.index,
-        y_min, 
-        y_max,
-        where=mask,
-        color=colors[i],
-        alpha=0.2
+        returns_scaled.index, y_min, y_max,
+        where=mask, color=colors[i], alpha=0.2
     )
 
-# Ajout de la légende pour les régimes avec patchs
+# Légende
 patches = [mpatches.Patch(color=colors[i], alpha=0.2, label=regime_labels[i]) for i in range(n_states)]
 all_handles = patches + [ax.lines[0]]
 ax.legend(handles=all_handles, loc='upper left', fontsize=10)
@@ -125,34 +182,26 @@ ax.set_ylabel("Rendement standardisé")
 ax.set_title("Détection des régimes de marché via HMM multivarié")
 ax.grid(True, linestyle='--', alpha=0.5)
 
-
-# --- DÉBUT MODIFICATION AXE X ---
-# Récupérer les années min et max de vos données (en s'assurant que ce sont des entiers)
+# Axe X (tous les 2 ans)
 start_year = int(returns_scaled.index.min()) 
 end_year = int(returns_scaled.index.max())   
-
-# Créer une liste d'années de 2 en 2
 ticks_to_show = np.arange(start_year, end_year + 2, 2) 
-
-# Appliquer ces ticks à l'axe
 ax.set_xticks(ticks_to_show)
+plt.xticks(rotation=45, ha='right', fontsize=9) 
 
-# Ajouter une rotation pour éviter que les labels ne se chevauchent
-plt.xticks(rotation=45, ha='right', fontsize=9) # 'ha' aligne le texte à droite
-# --- FIN MODIFICATION AXE X ---
-
-
-# Tableau récapitulatif sous le graphique
+# Tableau financier
 table = plt.table(
     cellText=table_data,
     colLabels=columns,
     cellLoc='center',
     loc='bottom',
-    bbox=[0.0, -0.45, 1.0, 0.35]  # Espace alloué pour le tableau
+    bbox=[0.0, -0.60, 1.0, 0.35]  
 )
 table.auto_set_font_size(False)
 table.set_fontsize(10)
 
-# Ajustement des marges pour laisser de la place au tableau
-plt.subplots_adjust(left=0.07, right=0.95, bottom=0.35, top=0.90)
+# Ajustement des marges
+plt.subplots_adjust(left=0.07, right=0.95, bottom=0.45, top=0.90) 
+
+print("Affichage du graphique des régimes financiers...")
 plt.show()
