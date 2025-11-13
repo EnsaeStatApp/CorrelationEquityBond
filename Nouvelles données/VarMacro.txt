@@ -1,0 +1,40 @@
+Here is an explanation of all the macroeconomic variables considered : (the source FRED is the Federal Reserve of St Louis
+
+
+1 - Real Activity :
+
+INDPRO : Industrial Production Index source : FRED
+
+USGDP : Nominal GDP / Real GDP / GDP Deflator / Population / Nominal GDP per capita / Real GDP per capita (Source : MeasuringWorth)
+
+Remarque : Unemployement Rate only starts at 1948 which is too late to be considered here (or shall we restrict our analysis starting this year ??)
+
+UNRATE : Unemployement Rate (BLS : Bureau of Labor Statistics)
+
+USRECD : NBER based Recession Indicators for the United States from the Period following the Peak through the Trough (Source : FRED)
+
+TCMILBSNNCB : Nonfinancial Corporate Business; Debt Securities and Loans; Liability, Level // le niveau total d’endettement (en dollars courants) des entreprises non financières américaines
+
+TCU : Manufacturing Capacity Utilization
+
+
+2 - Prices and Inflation
+
+PPIACO : Producer Price Index All Commodities (FRED)
+
+HP : Home Prices (FRED)
+
+GP : Gold Prices (FRED)
+
+CPI : Consumer Price Index (FRED)
+
+3 - Banques
+
+M2SL : Masse Monétaire
+
+DGS10 : Taux d’intérêt à long terme (ex : rendement des obligations d’État à 10 ans)
+
+TB3MS : 3-Month Treasury Bill Rate
+
+
+
