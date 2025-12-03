@@ -1,22 +1,18 @@
 """
-portfolio_hmm_monthly.py
+portfolio_hmm_monthly.py (VERSION FINALE)
 
 Usage: pip install pandas numpy scipy scikit-learn hmmlearn openpyxl
 
-Place the CSV files in the same folder:
-- S&P500.csv
-- AAA.csv
-- BAA.csv
-- 10Year_Treasury_Yield.csv
-- AWHMAN.csv, BUSLOANS.csv, CUMFNS.csv, DGS10.csv, INDPRO.csv, M2SL.csv,
-  M0516BUSM163SNBR.csv, PAYEMS.csv, PPIACO.csv, TB3MS.csv, TCU.csv,
-  UMCSENT.csv, UNRATE.csv, USRECD.csv
-
+Place the CSV files in the folder defined in DATA_DIR.
 The script:
 - reads them,
 - aligns on the common monthly date range,
-- computes monthly asset returns (S&P500 total return approx, bonds from yields),
+- TRANSFORMS MACRO DATA (YoY changes) to ensure stationarity,
+- CLEANS DATA (removes Infinities),
+- computes monthly asset returns,
 - runs a rolling HMM monthly and outputs monthly allocations for t+1.
+- NO LEVERAGE: Strict 100% investment cap.
+- DYNAMIC EXPORT: Handles any number of states (2, 3, 4...) for visualization.
 """
 
 import os
@@ -28,8 +24,9 @@ from scipy.optimize import minimize
 from datetime import datetime
 
 # -----------------------------
-# Paramètres (modifie ici si besoin)
+# Paramètres
 # -----------------------------
+# ATTENTION : Modifie ce chemin selon ton dossier local
 DATA_DIR = "C:/Users/skydr/Desktop/ENSAE/2eme Année/stat'app/Gestion portefeuille/"
 
 ASSET_FILES = {
@@ -46,10 +43,10 @@ MACRO_FILES = [
 ]
 
 # HMM + optimisation
-N_STATES = 4
+N_STATES = 4  # Tu peux changer ce chiffre (2, 3, 4), le code s'adaptera.
 COV_TYPE = 'full'
 RANDOM_STATE = 42
-N_ITER = 200
+N_ITER = 500
 ROLLING_FIT = True
 
 # Bond durations (approx) used to convert yield -> price sensitivity
@@ -60,7 +57,7 @@ DURATIONS = {
 }
 
 ALLOW_SHORT = False
-TARGET_VOL_ANN = 0.10
+TARGET_VOL_ANN = 0.10 # Agit comme un PLAFOND de volatilité
 MIN_TRAIN_PERIOD_MONTHS = 120
 
 OUT_DIR = 'hmm_monthly_output'
@@ -94,17 +91,19 @@ def read_monthly_csv(path):
     df = df.dropna(subset=[date_col])
     df = df.set_index(date_col)
 
-    # Conversion en Année-Mois
+    # Conversion en Année-Mois (pour alignement propre)
     df.index = df.index.to_period('M')
 
-    # Supprimer doublons
+    # Supprimer doublons éventuels
     df = df[~df.index.duplicated(keep='first')]
 
     # Détection colonne numérique
     num_col = next((c for c in df.columns if 'value' in c.lower() or pd.api.types.is_numeric_dtype(df[c])), df.columns[0])
 
-    # Nettoyage valeurs
-    df[num_col] = df[num_col].astype(str).str.replace(',', '.', regex=False).str.replace('"','', regex=False).str.strip()
+    # Nettoyage valeurs (virgules, guillemets)
+    if df[num_col].dtype == object:
+        df[num_col] = df[num_col].astype(str).str.replace(',', '.', regex=False).str.replace('"','', regex=False).str.strip()
+    
     df[num_col] = pd.to_numeric(df[num_col], errors='coerce')
     df = df.dropna(subset=[num_col])
 
@@ -117,6 +116,8 @@ def try_get_series_from_df(df):
     if 'Value' in df.columns:
         s = df['Value']
         return pd.to_numeric(s, errors='coerce')
+    
+    # Fallback
     num_cols = df.select_dtypes(include=['float64','int64']).columns
     if len(num_cols) == 0:
         first_col = df.columns[1] if df.columns[0].lower()=='date' and len(df.columns)>1 else df.columns[0]
@@ -130,6 +131,7 @@ def try_get_series_from_df(df):
 # -----------------------------
 def yields_to_monthly_bond_returns(yields_series, duration):
     ys = yields_series.copy().astype(float)
+    # Heuristique : si yield > 1.5 (ex: 5.0), c'est probablement en %, on convertit en décimal
     if ys.median() > 1.5:
         ys = ys / 100.0
     carry = ys / 12.0
@@ -157,20 +159,54 @@ def sp500_monthly_total_return(df_sp):
 # Align data on common monthly index
 # -----------------------------
 def build_common_dataframe(asset_files, macro_files):
+    # 1. Lire les actifs
     asset_series = {k: read_monthly_csv(f) for k,f in asset_files.items()}
-    macro_series = {f: try_get_series_from_df(read_monthly_csv(f)) for f in macro_files}
+    
+    # 2. Lire et TRANSFORMER les macros (FEATURE ENGINEERING)
+    macro_series = {}
+    for fname in macro_files:
+        df = read_monthly_csv(fname)
+        s = try_get_series_from_df(df)
+        
+        # --- MODIFICATION STATIONNARITÉ (YoY) ---
+        name_upper = os.path.basename(fname).upper()
+        
+        # Liste heuristique des variables qui sont des Taux (Rate) ou binaires (USRECD)
+        is_rate = any(x in name_upper for x in ['UNRATE', 'RATE', 'YIELD', 'DGS', 'TB3', 'AAA', 'BAA', 'FEDFUNDS', 'USRECD'])
+        
+        if is_rate:
+            # Pour un taux ou binaire, diff absolue sur 12 mois
+            s_transformed = s.diff(12)
+        else:
+            # Pour un niveau, variation en % sur 12 mois
+            s_transformed = s.pct_change(12)
+            
+        macro_series[fname] = s_transformed
 
-    # Intersection des index
+    # 3. Intersection des index
     all_indices = [v.index for v in list(asset_series.values()) + list(macro_series.values())]
     idx_intersection = all_indices[0]
     for idx in all_indices[1:]:
         idx_intersection = idx_intersection.intersection(idx)
     idx_intersection = idx_intersection.sort_values()
 
+    # 4. Reindex final et Nettoyage INFINITY
     assets_aligned = {k: try_get_series_from_df(df).reindex(idx_intersection) for k, df in asset_series.items()}
     macros_aligned = {k: s.reindex(idx_intersection) for k, s in macro_series.items()}
 
-    return pd.DataFrame(assets_aligned, index=idx_intersection), pd.DataFrame(macros_aligned, index=idx_intersection)
+    df_macros = pd.DataFrame(macros_aligned, index=idx_intersection)
+    df_assets = pd.DataFrame(assets_aligned, index=idx_intersection)
+
+    # --- SÉCURITÉ CRITIQUE : Remplacer l'infini par NaN ---
+    df_macros = df_macros.replace([np.inf, -np.inf], np.nan)
+    
+    # On supprime les lignes qui contiennent maintenant des NaN
+    df_macros = df_macros.dropna()
+    
+    # On réaligne les actifs sur les macros survivantes
+    df_assets = df_assets.reindex(df_macros.index)
+
+    return df_assets, df_macros
 
 # -----------------------------
 # HMM helpers
@@ -259,13 +295,15 @@ def run_monthly_pipeline(asset_files, macro_files, target_vol_ann=TARGET_VOL_ANN
         'SP': sp_ret, 'AAA': r_aaa, 'BAA': r_baa, 'T10': r_t10
     }, index=assets_df_raw.index).sort_index()
 
+    # Drop NaNs
     combined = pd.concat([asset_returns, macros_df_raw], axis=1).dropna(how='all')
     combined = combined.dropna(subset=['SP','AAA','BAA','T10'], how='any')
+    combined = combined.dropna(how='any')
 
     features_all = macros_df_raw.reindex(combined.index)
     assets_returns_aligned = asset_returns.reindex(combined.index)
 
-    print(f"Plage commune mensuelle: {features_all.index.min().to_timestamp().date()} -> {features_all.index.max().to_timestamp().date()}")
+    print(f"Plage commune mensuelle (après transfo YoY): {features_all.index.min().to_timestamp().date()} -> {features_all.index.max().to_timestamp().date()}")
     print(f"Nombre de mois disponibles: {len(features_all)}")
 
     allocations, diagnostics, transmats = [], [], []
@@ -290,23 +328,50 @@ def run_monthly_pipeline(asset_files, macro_files, target_vol_ann=TARGET_VOL_ANN
         state_means, state_covs = estimate_state_moments_from_states(states, train_assets)
         mu_pred, Sigma_pred = regime_weighted_moments(predictive_next, state_means, state_covs)
         Sigma_pred = Sigma_pred + 1e-8*np.eye(Sigma_pred.shape[0])
+        
+        # --- Optimisation "Long Only" (Pas de Levier) ---
         opt = optimize_portfolio(mu_pred, Sigma_pred, target_vol_ann, allow_short=ALLOW_SHORT)
 
-        allocations.append({'date': cutoff_date, 'weights': opt['weights'], 'achieved_vol_annual': opt.get('achieved_vol_annual'),
-                            'success': opt['success'], 'message': opt['message'], 'predictive_probs': predictive_next})
+        # On garde les poids bruts (somme = 1)
+        final_weights = opt['weights']
+        final_vol = opt['achieved_vol_annual']
+        leverage = 1.0 # Toujours 1.0
+
+        allocations.append({
+            'date': cutoff_date, 
+            'weights': final_weights, 
+            'achieved_vol_annual': final_vol,
+            'success': opt['success'], 
+            'message': opt['message'], 
+            'predictive_probs': predictive_next,
+            'leverage_used': leverage
+        })
         diagnostics.append({'date': cutoff_date, 'mu_pred': mu_pred, 'Sigma_trace': np.trace(Sigma_pred),
                             'predictive_probs': predictive_next, 'n_train_months': len(train_features)})
         transmats.append(model.transmat_)
-        if (pos-start_pos)%12==0:
+        if (pos-start_pos)%24==0:
             print(f"Processed {pos-start_pos} months (cutoff {cutoff_date.to_timestamp().date()})")
 
     dates = [a['date'] for a in allocations]
     weight_matrix = np.vstack([a['weights'] for a in allocations])
     weights_df = pd.DataFrame(weight_matrix, index=dates, columns=['w_SP','w_AAA','w_BAA','w_T10'])
-    diag_df = pd.DataFrame([{'date': d['date'],'achieved_vol_annual':d.get('achieved_vol_annual'),'success':d['success'],
-                             'message':d['message'],'p0':d['predictive_probs'][0],
-                             'p1':d['predictive_probs'][1],
-                             'p2':d['predictive_probs'][2] if len(d['predictive_probs'])>2 else np.nan} for d in allocations]).set_index('date')
+    
+    # --- EXPORT DYNAMIQUE POUR LE PLOT (CORRECTION) ---
+    # Cette boucle s'adapte automatiquement à N_STATES (p0, p1, p2, p3...)
+    diag_records = []
+    for d in allocations:
+        rec = {
+            'date': d['date'],
+            'achieved_vol_annual': d['achieved_vol_annual'],
+            'leverage_used': d['leverage_used'],
+            'success': d['success'],
+            'message': d['message']
+        }
+        for i, prob in enumerate(d['predictive_probs']):
+            rec[f'p{i}'] = prob
+        diag_records.append(rec)
+
+    diag_df = pd.DataFrame(diag_records).set_index('date')
     mean_transmat = np.mean(np.array(transmats), axis=0)
 
     weights_df.to_csv(os.path.join(OUT_DIR,'monthly_allocations.csv'))
@@ -324,5 +389,3 @@ if __name__ == '__main__':
                                n_states=N_STATES, durations=DURATIONS, rolling_fit=ROLLING_FIT)
     print("\nMatrice de transition (moyenne rolling):\n", out['mean_transmat'])
     print("\nExtrait allocations (dernier 5):\n", out['weights_df'].tail())
-
-
