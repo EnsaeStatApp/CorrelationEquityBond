@@ -33,6 +33,6 @@ class RegimeDetector(ABC):
     @abstractmethod
     def regime_covariances(self):
         """
-        Σ_k : covariance par régime
+        sigma_k : covariance par régime
         """
         pass
