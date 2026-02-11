@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from .regime_detector import RegimeDetector
+from RegimeDetector.base import RegimeDetector
 
-
-
-#### Idée : Cette classe (abstraite toujours) donne le comportement commun de chacun de nos détecteurs de régimes. 
-#### But : Ne pas réimplémenter à chaque fois les mêmes fonctions. 
 
 class BaseRegimeDetector(RegimeDetector):
-
+    """
+    Cette classe (abstraite toujours) donne le comportement commun de chacun de nos détecteurs de régimes. 
+    But : Ne pas réimplémenter à chaque fois les mêmes fonctions. 
+    """
     def conditional_covariance(self, t):
         """
         Covariance conditionnelle à t :
