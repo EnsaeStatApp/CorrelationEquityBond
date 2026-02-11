@@ -39,18 +39,6 @@ except ImportError:
 # 1. DÉFINITION DES CLASSES D'ALLOCATION
 # ==============================================================================
 
-class Allocator(ABC):
-    """
-    Classe abstraite qui donne le contrat minimal que doivent respecter tous nos allocateurs d'actifs.
-    """
-    @abstractmethod
-    def allocate(self, Sigma : np.ndarray) -> np.ndarray:
-        """
-        Sigma : matrice de cov de taille D*D où D est le nbr d'actifs
-        Renvoie le vecteur des poids (de taille D).
-        """
-        pass
-
 class MeanVarianceAllocator(Allocator):
     """
     Implémentation concrète utilisant l'optimisation Moyenne-Variance sous contrainte de Volatilité.
