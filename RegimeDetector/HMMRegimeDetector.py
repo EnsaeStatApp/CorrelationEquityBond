@@ -5,9 +5,12 @@ from RegimeDetector.base_detector import BaseRegimeDetector
 class HMMRegimeDetector(BaseRegimeDetector):
     """
     Wrappeur de la librairie ssm pour détecter les régimes de marché
+    
+    NB : Dans ce modèle, même si on ne rentre pas de covariables/inputs X (i.e. X est None et la matrice de transition est constante/sticky), 
+    ce code fonctionne car ssm est suffisamment flexible pour l'ignorer
     """
     def __init__(self, n_regimes: int = 2, n_dim: int = 2, observations: str = "gaussian", transitions: str = "sticky", 
-                 transition_kwargs: dict = None, random_state: int = 42):
+                 transition_kwargs: dict = None, random_state: int = 42, n_input : int = 0):
         """
         Parametres: 
         - n_regimes : nombre de régimes souhaités
@@ -16,21 +19,24 @@ class HMMRegimeDetector(BaseRegimeDetector):
         - transitions : choix de la modélisation de la matrice de transition ("sticky" pour matrice de transition collante, sinon "standard)
         - transition_kwargs : choix des hyperparamètres pour les transitions (kappa et alpha dans ce modèle)
         - random_state : le seed sur lequel va se faire l'algo EM (important)
+        - n_input : nombre de covariables/inputs qui impactent les transitions (défaut 0 dans ce modèle statique)
+
         """
         self.K = n_regimes
         self.D = n_dim
+        self.M = n_input
         self.observations = observations
         self.transitions = transitions
         self.transition_kwargs = transition_kwargs or {"kappa": 10, "alpha": 2}
         self.random_state = random_state
         
         np.random.seed(self.random_state)
-        self.model = ssm.HMM(self.K, self.D, observations=self.observations, transitions=self.transitions, 
+        self.model = ssm.HMM(self.K, self.D, self.M, observations=self.observations, transitions=self.transitions, 
                              transition_kwargs=self.transition_kwargs) # modèle initialisé
         
         self.is_fitted = False
         self.fit_data = None
-        self.viterbi_states = None
+        self.viterbi_states = None # représente les régimes sur le jeu de train (in-sample)
 
     def fit(self, Y: list = None,  X: list = None, series_index: int = 0, num_iters: int = 200):
         """
@@ -45,7 +51,8 @@ class HMMRegimeDetector(BaseRegimeDetector):
         self.model.fit(Y, method="em", num_iters=num_iters, init_method="kmeans", verbose=0)
         self.is_fitted = True
         self.fit_data = Y
-        self.viterbi_states = self.model.most_likely_states(Y[series_index]) # les états les plus probables pour chaque date (NB : on utilise viterbi de ssm car on est sur l'in-sample)
+        self.fit_input = X
+        self.viterbi_states = self.model.most_likely_states(Y[series_index], input=X[series_index] if X is not None else None) # les états les plus probables pour chaque date (NB : on utilise viterbi de ssm car on est sur l'in-sample)
         return self
 
     def regime_probabilities(self, series_index : int = 0):
@@ -58,8 +65,9 @@ class HMMRegimeDetector(BaseRegimeDetector):
         """
         if not self.is_fitted:
             raise ValueError("Modèle non fitté.")
-        data = self.fit_data[series_index]
-        return self.model.expected_states(data)[0][0]
+        data = self.fit_data[series_index] # array
+        input = self.fit_input[series_index] if self.fit_input is not None else None
+        return self.model.expected_states(data=data, input=input)[0] # [0] car renvoie un tuple
 
     def regime_covariances(self):
         """
@@ -71,20 +79,21 @@ class HMMRegimeDetector(BaseRegimeDetector):
         cov_array = self.model.observations.Sigmas
         return [cov_array[k] for k in range(self.K)]
     
-    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None, horizon: int = 1):
+    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None):
         """
-        Projette les probabilités de régimes à T + horizon.
+        Calcule les probabilités prédictives P(z_t | Y_{1:t-1})
 
-        Paramètres:
-        - Y : liste de séries de log returns
-        - X : liste de covariables (présent par soucis de généralité mais ignoré dans ce modèle)
-        - horizon : tq que T+horizon est la date à laquelle on calcule les probabilités
         """
         if not self.is_fitted:
             raise ValueError("Modèle non fitté.")
-
-        probs_T = self.model.expected_states(Y)[0][0][-1, :] # P(z_T | Y_{1:T}, X_{1:T})
-        A = self.model.transitions.transition_matrix # Matrice de transition A
-        A_n = np.linalg.matrix_power(A, horizon) # A^horizon
-        return probs_T @ A_n # Projection
-     
+        
+        predictive_probs = self.model.filter(data=Y, input=X) # predictive_probs[t] = P(z_t | Y_{1:t-1})
+        return predictive_probs
+    
+    def regime_means(self):
+        """
+        Renvoie les moyennes des log returns dans chaque régime
+        """
+        if not self.is_fitted:
+            raise ValueError("Modèle non fitté.")
+        return self.model.observations.mus
