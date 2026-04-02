@@ -81,3 +81,18 @@ class HMMDetector(BaseRegimeDetector):
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         return np.exp(self.model.transitions.log_Ps)
+
+    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None, horizon: int = 1) -> np.ndarray:
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+        Y = np.array(Y, dtype=float)
+        if Y.ndim == 1:
+            Y = Y[:, None]
+        # Probabilité filtrée au dernier instant
+        _, filtered = self.model.filter(Y)
+        current_probs = filtered[-1]  # P(z_T | Y_{1:T})
+        # Propagation sur `horizon` pas via la matrice de transition
+        A = self.get_transition_matrix()
+        for _ in range(horizon):
+            current_probs = current_probs @ A
+        return current_probs
