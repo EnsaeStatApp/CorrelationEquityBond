@@ -124,30 +124,43 @@ class RegimeVisualizer:
         return fig
 
     def plot_implied_correlation(self, figsize=(16, 5), savepath=None):
-        """
-        Corrélation implicite SP500 / T-bond calculée depuis les données financières Y,
-        conditionnellement aux régimes détectés sur les variables macro.
-        """
-        probs = self.detector.regime_probabilities()  # (T, K) — probabilités macro
+        probs = self.detector.regime_probabilities()  # (T, K) — probabilités lissées douces
         T, K = probs.shape
+        window = 36  # fenêtre glissante de 36 mois
     
-        # Covariances financières empiriques par régime (sur Y, pas sur les macro)
-        states = self.states
-        fin_covs = []
-        for k in range(K):
-            mask = (states == k)
-            subset = self.Y[mask, :2]  # SP500 et T-bond uniquement
-            if subset.shape[0] < 2:
-                fin_covs.append(np.eye(2))
-            else:
-                fin_covs.append(np.cov(subset.T, ddof=1))
-    
-        # Corrélation implicite via loi des espérances totales
         implied_corr = np.zeros(T)
+    
         for t in range(T):
-            sigma_t = sum(probs[t, k] * fin_covs[k] for k in range(K))
-            std_t = np.sqrt(np.diag(sigma_t))
-            implied_corr[t] = sigma_t[0, 1] / (std_t[0] * std_t[1])
+            if t < window:
+                # Pas assez d'historique : covariance empirique simple
+                subset = self.Y[:max(t, 2), :2]
+                cov = np.cov(subset.T, ddof=1)
+            else:
+                # Covariance financière pondérée par les probabilités de régime
+                # sur la fenêtre glissante
+                w = probs[t-window:t, :]  # (window, K)
+                Y_w = self.Y[t-window:t, :2]  # (window, 2)
+    
+                # Poids scalaires = probabilité moyenne du régime dominant
+                regime_weights = w.mean(axis=0)  # (K,)
+    
+                # Covariance par régime sur la fenêtre
+                cov = np.zeros((2, 2))
+                for k in range(K):
+                    mask = w[:, k] > 0.3  # points où le régime k est probable
+                    if mask.sum() >= 2:
+                        cov_k = np.cov(Y_w[mask].T, ddof=1)
+                    else:
+                        cov_k = np.cov(Y_w.T, ddof=1)
+                    cov += regime_weights[k] * cov_k
+    
+            std = np.sqrt(np.diag(cov))
+            if std[0] > 0 and std[1] > 0:
+                implied_corr[t] = cov[0, 1] / (std[0] * std[1])
+    
+        # Lissage léger pour éviter le bruit
+        from scipy.ndimage import uniform_filter1d
+        implied_corr = uniform_filter1d(implied_corr, size=6)
     
         fig, ax = plt.subplots(figsize=figsize)
         self._shade_regimes(ax)
