@@ -3,95 +3,58 @@ import ssm
 from RegimeDetector.base_detector import BaseRegimeDetector
 
 class HMMDetector(BaseRegimeDetector):
-    """
-    Implémentation d'un HMM Gaussien standard (Classic Hidden Markov Model)
-    basé sur la librairie 'ssm' (Linderman Lab).
-    """
 
     def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42):
         self.n_states = n_states
         self.n_iter = n_iter
         self.seed = random_state
         self.model = None
-        self._fitted_probs = None # Cache pour les probas sur le train set
+        self._fitted_probs = None
+        self.viterbi_states = None
 
-    def fit(self, Y: np.ndarray, X: np.ndarray = None):
-        """
-        Adapte un HMM Gaussien sur les données Y (T x D).
-        X est ignoré pour un HMM standard (ce n'est pas un InputHMM).
-        """
-        # Assurer le format numpy float (T, D)
+    def fit(self, Y, X=None):
+        if isinstance(Y, list):
+            Y = Y[0]
         Y = np.array(Y, dtype=float)
         if Y.ndim == 1:
             Y = Y[:, None]
-
         T, D = Y.shape
-
-        # Initialisation du modèle HMM via ssm
         np.random.seed(self.seed)
-        # observations="gaussian" crée un GaussianHMM standard
         self.model = ssm.HMM(self.n_states, D, observations="gaussian")
-
-        # Apprentissage (EM)
         self.model.fit(Y, method="em", num_iters=self.n_iter, verbose=0)
-
-        # Calcul et stockage des probabilités lissées (smoothed probabilities) sur le train
-        # expected_states retourne (Ez, Ezz, Ezzz), où Ez est (T, K)
-        expectations = self.model.expected_states(Y)
-        self._fitted_probs = expectations[0]
-
+        self._fitted_probs = self.model.expected_states(Y)[0]
+        self.viterbi_states = self.model.most_likely_states(Y)
+        self._Y_fitted = Y
         return self
 
-    def regime_probabilities(self, series_index: int = 0, Y: np.ndarray = None, X: np.ndarray = None):
-        """
-        Renvoie les probabilités d'état lissées P(z_t | Y_{1:T}).
-        Si Y est None, renvoie celles calculées lors du fit.
-        Sinon, calcule sur les nouvelles données Y.
-        """
+    def regime_probabilities(self, series_index=0, Y=None, X=None):
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné (fit).")
-
+            raise ValueError("Le modèle n'a pas été entraîné.")
         if Y is None:
             return self._fitted_probs
-
-        # Inférence sur de nouvelles données
         Y = np.array(Y, dtype=float)
         if Y.ndim == 1:
             Y = Y[:, None]
-
-        # On utilise expected_states (Forward-Backward) pour avoir les probas lissées
-        expectations = self.model.expected_states(Y)
-        return expectations[0]
+        return self.model.expected_states(Y)[0]
 
     def regime_covariances(self):
-        """
-        Renvoie les matrices de covariance des observations pour chaque régime.
-        Format : (K, D, D)
-        """
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
-
-        # Dans ssm, accès direct via model.observations.Sigmas
         return self.model.observations.Sigmas
 
     def get_transition_matrix(self):
-        """
-        Helper spécifique à SSM pour récupérer la matrice de transition (K x K).
-        """
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         return np.exp(self.model.transitions.log_Ps)
 
-    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None, horizon: int = 1) -> np.ndarray:
+    def predict_probabilities(self, Y, X=None, horizon=1):
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         Y = np.array(Y, dtype=float)
         if Y.ndim == 1:
             Y = Y[:, None]
-        # Probabilité filtrée au dernier instant
         _, filtered = self.model.filter(Y)
-        current_probs = filtered[-1]  # P(z_T | Y_{1:T})
-        # Propagation sur `horizon` pas via la matrice de transition
+        current_probs = filtered[-1]
         A = self.get_transition_matrix()
         for _ in range(horizon):
             current_probs = current_probs @ A
