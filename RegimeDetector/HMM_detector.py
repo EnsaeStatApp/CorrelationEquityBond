@@ -1,7 +1,6 @@
 import numpy as np
 import ssm
-#from .base_detector import BaseRegimeDetector
-#Dans un environnement autre que Jupiter ou Google Collab, enlever le hashtag ci-dessus
+from RegimeDetector.base_detector import BaseRegimeDetector
 
 class HMMDetector(BaseRegimeDetector):
     """
