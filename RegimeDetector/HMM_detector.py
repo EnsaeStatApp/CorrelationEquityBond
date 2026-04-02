@@ -130,3 +130,15 @@ class HMMDetector(BaseRegimeDetector):
             current_probs = current_probs @ A
 
         return current_probs
+
+    def regime_means(self):
+        """
+        Retourne les moyennes des observations dans chaque régime — shape (K, D).
+    
+        NB : si les données ont été scalées (×100) lors du fit, les moyennes
+        sont dans la même unité. Diviser par 100 pour revenir en décimal.
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+        return self.model.observations.mus
+
