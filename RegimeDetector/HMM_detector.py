@@ -21,7 +21,7 @@ class HMMDetector(BaseRegimeDetector):
         Valeurs conseillées : 1.0 (réactif) à 10.0 (persistant).
     """
 
-    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42, kappa):
+    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42, kappa: float = 5.0):
         self.n_states = n_states
         self.n_iter = n_iter
         self.seed = random_state
