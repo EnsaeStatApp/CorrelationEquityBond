@@ -32,9 +32,17 @@ class RegimeVisualizer:
         self.events_dict = events_dict or {}
 
     def _shade_regimes(self, ax):
-        for t in range(len(self.dates)):
-            x0 = self.dates[t] - pd.Timedelta(days=15)
-            x1 = self.dates[t] + pd.Timedelta(days=15)
+        dates = self.dates
+        n = len(dates)
+        for t in range(n):
+            if t == 0:
+                x0 = dates[0] - (dates[1] - dates[0]) / 2
+            else:
+                x0 = dates[t] - (dates[t] - dates[t-1]) / 2
+            if t == n - 1:
+                x1 = dates[-1] + (dates[-1] - dates[-2]) / 2
+            else:
+                x1 = dates[t] + (dates[t+1] - dates[t]) / 2
             ax.axvspan(x0, x1, alpha=0.25,
                        color=self.regime_colors.get(self.states[t], "gray"),
                        linewidth=0, zorder=0)
@@ -123,44 +131,59 @@ class RegimeVisualizer:
         plt.show()
         return fig
 
-    def plot_implied_correlation(self, figsize=(16, 5), savepath=None):
-        probs = self.detector.regime_probabilities()  # (T, K) — probabilités lissées douces
+    def plot_implied_correlation(self, figsize=(16, 5), savepath=None, halflife=24):
+        """
+        Corrélation implicite SP500 / T-bond via covariances EWMA pondérées
+        par les probabilités de régime du HMM Macro.
+    
+        Paramètres
+        ----------
+        halflife : int
+            Demi-vie en mois pour la décroissance exponentielle des poids EWMA.
+        """
+        probs = self.detector.regime_probabilities()  # (T, K)
         T, K = probs.shape
-        window = 36  # fenêtre glissante de 36 mois
+    
+        # Poids EWMA : décroissance exponentielle, le passé récent pèse plus
+        alpha = 1 - np.exp(-np.log(2) / halflife)  # taux de décroissance
+        ewma_weights = np.array([(1 - alpha) ** i for i in range(T)])
+        ewma_weights = ewma_weights[::-1]  # ordre chronologique
+        ewma_weights /= ewma_weights.sum()  # normalisation
     
         implied_corr = np.zeros(T)
     
-        for t in range(T):
-            if t < window:
-                # Pas assez d'historique : covariance empirique simple
-                subset = self.Y[:max(t, 2), :2]
-                cov = np.cov(subset.T, ddof=1)
-            else:
-                # Covariance financière pondérée par les probabilités de régime
-                # sur la fenêtre glissante
-                w = probs[t-window:t, :]  # (window, K)
-                Y_w = self.Y[t-window:t, :2]  # (window, 2)
+        for t in range(2, T):
+            # Poids EWMA tronqués jusqu'à t et renormalisés
+            w_time = ewma_weights[:t].copy()
+            w_time /= w_time.sum()
     
-                # Poids scalaires = probabilité moyenne du régime dominant
-                regime_weights = w.mean(axis=0)  # (K,)
+            Y_hist = self.Y[:t, :2]  # historique SP500 / T-bond jusqu'à t
     
-                # Covariance par régime sur la fenêtre
-                cov = np.zeros((2, 2))
-                for k in range(K):
-                    mask = w[:, k] > 0.3  # points où le régime k est probable
-                    if mask.sum() >= 2:
-                        cov_k = np.cov(Y_w[mask].T, ddof=1)
-                    else:
-                        cov_k = np.cov(Y_w.T, ddof=1)
-                    cov += regime_weights[k] * cov_k
+            # Probabilités de régime moyennes pondérées par EWMA jusqu'à t
+            regime_weights = (probs[:t, :] * w_time[:, None]).sum(axis=0)  # (K,)
+            regime_weights /= regime_weights.sum()
+    
+            # Covariance EWMA par régime
+            cov = np.zeros((2, 2))
+            for k in range(K):
+                # Poids combinés : EWMA × probabilité d'être dans le régime k
+                w_k = w_time * probs[:t, k]
+                if w_k.sum() < 1e-8:
+                    continue
+                w_k /= w_k.sum()
+    
+                # Moyenne pondérée
+                mu_k = (Y_hist * w_k[:, None]).sum(axis=0)
+    
+                # Covariance pondérée
+                diff = Y_hist - mu_k
+                cov_k = (diff * w_k[:, None]).T @ diff
+    
+                cov += regime_weights[k] * cov_k
     
             std = np.sqrt(np.diag(cov))
-            if std[0] > 0 and std[1] > 0:
-                implied_corr[t] = cov[0, 1] / (std[0] * std[1])
-    
-        # Lissage léger pour éviter le bruit
-        from scipy.ndimage import uniform_filter1d
-        implied_corr = uniform_filter1d(implied_corr, size=6)
+            if std[0] > 1e-8 and std[1] > 1e-8:
+                implied_corr[t] = np.clip(cov[0, 1] / (std[0] * std[1]), -1, 1)
     
         fig, ax = plt.subplots(figsize=figsize)
         self._shade_regimes(ax)
