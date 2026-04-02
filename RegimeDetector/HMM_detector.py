@@ -15,12 +15,17 @@ class HMMDetector(BaseRegimeDetector):
         Nombre d'itérations EM pour l'apprentissage.
     random_state : int
         Graine aléatoire pour la reproductibilité.
+    kappa : float
+        Force de persistance des régimes (transitions "sticky").
+        0 = transitions standard sans biais, >0 = biais de persistance croissant.
+        Valeurs conseillées : 1.0 (réactif) à 10.0 (persistant).
     """
 
-    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42):
+    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42, kappa: float = 5.0):
         self.n_states = n_states
         self.n_iter = n_iter
         self.seed = random_state
+        self.kappa = kappa
         self.model = None
         self._fitted_probs = None   # Cache des probabilités lissées (in-sample)
         self.viterbi_states = None  # Séquence d'états la plus probable (Viterbi)
@@ -44,7 +49,17 @@ class HMMDetector(BaseRegimeDetector):
         T, D = Y.shape
 
         np.random.seed(self.seed)
-        self.model = ssm.HMM(self.n_states, D, observations="gaussian")
+
+        # Transitions sticky si kappa > 0, standard sinon
+        if self.kappa > 0:
+            self.model = ssm.HMM(
+                self.n_states, D,
+                observations="gaussian",
+                transitions="sticky",
+                transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
+            )
+        else:
+            self.model = ssm.HMM(self.n_states, D, observations="gaussian")
 
         # Apprentissage par Expectation-Maximisation
         self.model.fit(Y, method="em", num_iters=self.n_iter, verbose=0)
@@ -85,6 +100,18 @@ class HMMDetector(BaseRegimeDetector):
             raise ValueError("Le modèle n'a pas été entraîné.")
 
         return self.model.observations.Sigmas
+
+    def regime_means(self):
+        """
+        Retourne les moyennes des observations dans chaque régime — shape (K, D).
+
+        NB : si les données ont été scalées (×100) lors du fit, les moyennes
+        sont dans la même unité. Diviser par 100 pour revenir en décimal.
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+
+        return self.model.observations.mus
 
     def get_transition_matrix(self):
         """
@@ -130,15 +157,3 @@ class HMMDetector(BaseRegimeDetector):
             current_probs = current_probs @ A
 
         return current_probs
-
-    def regime_means(self):
-        """
-        Retourne les moyennes des observations dans chaque régime — shape (K, D).
-    
-        NB : si les données ont été scalées (×100) lors du fit, les moyennes
-        sont dans la même unité. Diviser par 100 pour revenir en décimal.
-        """
-        if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
-        return self.model.observations.mus
-
