@@ -1,5 +1,5 @@
 import numpy as np
-from RegimeDetector.base import BaseRegimeDetector
+from RegimeDetector.base import RegimeDetector
 
 
 class BaseRegimeDetector(RegimeDetector):
