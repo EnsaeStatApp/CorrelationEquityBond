@@ -14,26 +14,52 @@ class HMMDetector(BaseRegimeDetector):
     n_iter : int
         Nombre d'itérations EM pour l'apprentissage.
     random_state : int
-        Graine aléatoire pour la reproductibilité.
+        Graine aléatoire pour la reproductibilité du modèle final.
     kappa : float
         Force de persistance des régimes (transitions "sticky").
         0 = transitions standard sans biais, >0 = biais de persistance croissant.
         Valeurs conseillées : 1.0 (réactif) à 10.0 (persistant).
+    n_restarts : int
+        Nombre de restarts avec initialisation K-Means.
+        Le modèle retenu est celui maximisant la log-vraisemblance.
     """
 
-    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42, kappa: float = 5.0):
+    def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42,
+                 kappa: float = 5.0, n_restarts: int = 10):
         self.n_states = n_states
         self.n_iter = n_iter
         self.seed = random_state
         self.kappa = kappa
+        self.n_restarts = n_restarts
         self.model = None
         self._fitted_probs = None   # Cache des probabilités lissées (in-sample)
         self.viterbi_states = None  # Séquence d'états la plus probable (Viterbi)
         self._Y_fitted = None       # Données d'entraînement conservées pour référence
 
+    def _build_model(self, D: int):
+        """
+        Instancie un HMM ssm selon la configuration de l'objet.
+
+        Paramètres
+        ----------
+        D : int
+            Dimension des observations.
+        """
+        if self.kappa > 0:
+            return ssm.HMM(
+                self.n_states, D,
+                observations="gaussian",
+                transitions="sticky",
+                transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
+            )
+        return ssm.HMM(self.n_states, D, observations="gaussian")
+
     def fit(self, Y, X=None):
         """
-        Entraîne le HMM sur les données Y via l'algorithme EM.
+        Entraîne le HMM sur les données Y via l'algorithme EM avec initialisation K-Means.
+
+        Effectue n_restarts runs indépendants et retient le modèle maximisant
+        la log-vraisemblance pour éviter les optima locaux.
 
         Accepte Y sous forme de liste (contrat RegimeDetector) ou de tableau (T, D).
         X est ignoré : HMMDetector est un modèle non-conditionnel.
@@ -48,21 +74,20 @@ class HMMDetector(BaseRegimeDetector):
 
         T, D = Y.shape
 
-        np.random.seed(self.seed)
+        # Multi-restart K-Means : on retient le modèle avec la meilleure log-vraisemblance
+        best_ll = -np.inf
 
-        # Transitions sticky si kappa > 0, standard sinon
-        if self.kappa > 0:
-            self.model = ssm.HMM(
-                self.n_states, D,
-                observations="gaussian",
-                transitions="sticky",
-                transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
-            )
-        else:
-            self.model = ssm.HMM(self.n_states, D, observations="gaussian")
+        for seed in range(self.n_restarts):
+            np.random.seed(seed)
+            candidate = self._build_model(D)
 
-        # Apprentissage par Expectation-Maximisation
-        self.model.fit(Y, method="em", num_iters=self.n_iter, verbose=0)
+            candidate.fit(Y, method="em", num_iters=self.n_iter,
+                          init_method="kmeans", verbose=0)
+
+            ll = candidate.log_probability(Y)
+            if ll > best_ll:
+                best_ll = ll
+                self.model = candidate
 
         # Probabilités lissées P(z_t | Y_{1:T}) via Forward-Backward
         self._fitted_probs = self.model.expected_states(Y)[0]
