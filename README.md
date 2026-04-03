@@ -1,7 +1,7 @@
 # Corrélation indices actions/obligations : projet stat'app ENSAE-HSBC
 
 Lien HMM Market  InSample S&P/T-Bond 10y (1970-2025) : 
-WIP
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond/blob/main/RegimeDetector/HMM_InSample_Regime_Analysis_EquityBond.ipynb)
 Lien IOHMM Market InSample S&P/T-Bond 10y (1970-2025) : 
 WIP
 Lien HMM Macro InSample S&P/T-Bond 10y (1970-2025) : 
