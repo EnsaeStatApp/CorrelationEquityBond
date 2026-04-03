@@ -44,17 +44,37 @@ class RegimeDetector(ABC):
         pass
     
     @abstractmethod
-    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None, horizon: int = 1) -> np.ndarray:
+    def predict_probabilities(self, Y: np.ndarray, X: np.ndarray = None, oos_start: int = 0, oos_end: int = None) -> np.ndarray:
         """
-        Renvoie une série (de taille (K,) ) de probabilités d'être dans chaque régime à l'instant T + horizon sachant tout jusqu'à len(Y) 
-        i.e. le vecteur P(z_{T+horizon} | Y_{1:T}, X_{1:T})
-        
-        Paramètres :
-        - Y : tableau de log returns
-        - X : tableau de covariables pouvant impacter les transitions
-        - horizon : tq que T+horizon est la date à laquelle on calcule les probabilités
+        Calcule les probabilités prédictives sur tout l'in-sample + l'OOS (pour le contexte) mais ne renvoie les probabilités que 
+        sur l'OOS
 
-        NB : cette fonction a besoin de prendre le Y et le X en entier pour le contexte de la probabilité 
+        A la ligne t, P(z_t | Y_{1:t-1}, X_{1:t-1})
+
+        Paramètres :
+        - Y : tableaux des observations du detector sur l'in-sample + l'OOS (pour contexte)
+        - X : tableaux des covariables impactant les transitions sur l'in-sample + l'OOS (pour contexte)
+        - oos_start : indice de début de l'OOS
+        - oos_end : indice de fin de l'OOS
         """
         pass
 
+    @abstractmethod
+    def regime_means(self) -> List[np.ndarray]:
+        """
+        Renvoie la liste des vecteurs de moyenne de chaque régime pour les actifs
+        """
+        pass
+
+    @abstractmethod
+
+
+    @abstractmethod
+    def conditional_covariance(self, probs: np.ndarray) -> np.ndarray:
+        """
+        Renvoie les matrices de covariance en utilisant un tableau de probas
+
+        Paramètres :
+        - probs : tableaux des probabilités servant à calculer les matrices de covariances à chaque date
+        """
+        pass
