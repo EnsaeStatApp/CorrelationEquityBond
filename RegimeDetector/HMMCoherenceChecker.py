@@ -56,10 +56,21 @@ class HMMCoherenceChecker:
         # On récupère les états Viterbi pour l'analyseur d'émissions
         states = self.detector.viterbi_states
 
+        # Normalisation des asset_names : garantit exactement D noms,
+        # quels que soient None, liste vide ou liste trop courte/longue.
+        lr = np.array(self.log_returns)
+        D = lr.shape[1] if lr.ndim == 2 else 1
+        provided = list(self.asset_names) if self.asset_names is not None else []
+        # Compléter avec des noms génériques si nécessaire
+        asset_names_safe = [
+            provided[i] if i < len(provided) else f"Asset_{i+1}"
+            for i in range(D)
+        ]
+
         stat_ana = EmissionStatisticalAnalyzer(
             log_returns=self.log_returns,
             states=states,
-            asset_names=self.asset_names
+            asset_names=asset_names_safe
         )
         trans_ana = TransitionStatisticalAnalyzer(detector=self.detector)
 
