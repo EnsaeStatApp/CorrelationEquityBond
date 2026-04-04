@@ -411,6 +411,31 @@ class HMMDetector(BaseRegimeDetector):
             raise ValueError("Le modèle n'a pas été entraîné.")
         return np.exp(self.model.transitions.log_Ps)
 
+    def get_transition_matrices(self, inputs=None) -> np.ndarray:
+        """
+        Retourne la séquence de matrices de transition — shape (T, K, K).
+
+        Pour un HMM standard (non-conditionnel), la matrice est constante :
+        la même matrice (K, K) est répétée T fois. Si inputs est fourni,
+        T est inféré de sa longueur, sinon depuis les observations du fit.
+
+        Paramètres
+        ----------
+        inputs : np.ndarray (T, M) ou None — ignoré pour un HMM non-conditionnel.
+
+        Retourne
+        --------
+        np.ndarray (T, K, K)
+        """
+        A = self.get_transition_matrix()  # (K, K)
+        if inputs is not None:
+            T = np.array(inputs).shape[0]
+        elif self._observations_fitted is not None:
+            T = self._observations_fitted.shape[0]
+        else:
+            raise ValueError("Impossible d'inférer T : passez inputs ou appelez fit() d'abord.")
+        return np.tile(A, (T, 1, 1))  # (T, K, K)
+
     # ------------------------------------------------------------------
     # get_transition_params / set_transition_params
     # Requis par TransitionStatisticalAnalyzer (save → perturb → restore)
