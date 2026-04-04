@@ -421,18 +421,20 @@ class HMMDetector(BaseRegimeDetector):
         Retourne les paramètres bruts de transition pour sauvegarde.
 
         Pour un HMM standard (non-conditionnel), seuls les log-probabilités
-        de transition log_Ps sont des paramètres libres. Il n'y a pas de
-        poids logistiques covariables (Ws = None).
+        de transition log_Ps sont des paramètres libres. Ws est retourné comme
+        un array vide de shape (K, 0) — sans covariables — pour rester compatible
+        avec TransitionStatisticalAnalyzer qui suppose toujours un array indexable.
 
         Retourne
         --------
         log_Ps : np.ndarray (K, K) — copie des log-probabilités de transition.
-        Ws     : None — pas de poids covariables pour un HMM non-conditionnel.
+        Ws     : np.ndarray (K, 0) — array vide (pas de covariables).
         """
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         log_Ps = self.model.transitions.log_Ps.copy()
-        return log_Ps, None
+        Ws = np.zeros((self.K, 0))   # (K, M=0) : compatible avec toutes les ops array
+        return log_Ps, Ws
 
     def set_transition_params(self, log_Ps: np.ndarray, Ws=None):
         """
