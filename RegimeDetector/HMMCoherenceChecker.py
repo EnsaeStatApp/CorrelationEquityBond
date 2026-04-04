@@ -56,19 +56,26 @@ class HMMCoherenceChecker:
         # On récupère les états Viterbi pour l'analyseur d'émissions
         states = self.detector.viterbi_states
 
-        # Normalisation des asset_names : garantit exactement D noms,
-        # quels que soient None, liste vide ou liste trop courte/longue.
-        lr = np.array(self.log_returns)
-        D = lr.shape[1] if lr.ndim == 2 else 1
-        provided = list(self.asset_names) if self.asset_names is not None else []
-        # Compléter avec des noms génériques si nécessaire
-        asset_names_safe = [
-            provided[i] if i < len(provided) else f"Asset_{i+1}"
-            for i in range(D)
-        ]
+        # Résolution des log_returns et asset_names cohérents :
+        # Si asset_names est fourni explicitement, il fait foi sur la dimension à analyser.
+        # On tronque log_returns aux N premières colonnes (N = len(asset_names)) pour éviter
+        # d'analyser des colonnes macro/extra qui auraient été concaténées dans data_to_fit.
+        lr_full = np.array(self.log_returns)
+        if lr_full.ndim == 1:
+            lr_full = lr_full[:, None]
+
+        if self.asset_names is not None and len(self.asset_names) > 0:
+            # asset_names fourni → il définit le nombre de colonnes financières à analyser
+            n_assets = len(self.asset_names)
+            lr = lr_full[:, :n_assets]          # tronquer les colonnes excédentaires
+            asset_names_safe = list(self.asset_names)
+        else:
+            # asset_names absent → on prend toutes les colonnes et on génère des noms
+            lr = lr_full
+            asset_names_safe = [f"Asset_{i+1}" for i in range(lr.shape[1])]
 
         stat_ana = EmissionStatisticalAnalyzer(
-            log_returns=self.log_returns,
+            log_returns=lr,
             states=states,
             asset_names=asset_names_safe
         )
