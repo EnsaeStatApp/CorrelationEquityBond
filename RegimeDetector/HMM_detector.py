@@ -41,6 +41,15 @@ class HMMDetector(BaseRegimeDetector):
         self._log_returns_fitted = None     # Log returns financiers alignés sur le fit
 
     # ------------------------------------------------------------------
+    # Propriété is_fitted — requise par HMMCoherenceChecker
+    # ------------------------------------------------------------------
+
+    @property
+    def is_fitted(self) -> bool:
+        """Retourne True si le modèle a été entraîné (fit() appelé avec succès)."""
+        return self.model is not None and self.viterbi_states is not None
+
+    # ------------------------------------------------------------------
     # Méthode privée : instanciation du modèle SSM
     # ------------------------------------------------------------------
 
@@ -136,15 +145,22 @@ class HMMDetector(BaseRegimeDetector):
         ----------
         observations : List[np.ndarray] ou np.ndarray
             Variables d'observation du HMM (ex : macro standardisées).
-            Accepte une liste (contrat RegimeDetector) ou un tableau (T, D).
+            Accepte une liste de la forme [obs_array] ou un tableau (T, D).
+            Si une liste est fournie, observations[0] est utilisé pour le fit
+            et observations[1] (si présent) est stocké comme log_returns financiers.
         inputs : ignoré
             HMMDetector est un modèle non-conditionnel sur les transitions.
         log_returns : List[np.ndarray] ou np.ndarray, optionnel
             Log returns financiers alignés sur observations.
             Stockés pour le calcul des métriques de régime (moyennes, covariances).
+            Prioritaire sur observations[1] si les deux sont fournis.
         """
-        # Extraction si format liste
+        # Extraction si format liste :
+        # observations[0] → données du fit HMM
+        # observations[1] → log returns financiers (optionnel, si log_returns non fourni)
         if isinstance(observations, list):
+            if log_returns is None and len(observations) > 1:
+                log_returns = observations[1]
             observations = observations[0]
         observations = np.array(observations, dtype=float)
         if observations.ndim == 1:
@@ -388,3 +404,38 @@ class HMMDetector(BaseRegimeDetector):
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         return np.exp(self.model.transitions.log_Ps)
+
+    # ------------------------------------------------------------------
+    # compute_confidence_index — requise par HMMCoherenceChecker
+    # ------------------------------------------------------------------
+
+    def compute_confidence_index(self, series_index: int = 0) -> np.ndarray:
+        """
+        Calcule l'indice de confiance à chaque pas de temps comme (1 - entropie normalisée).
+
+        Une valeur proche de 1 indique que le modèle est très certain du régime courant
+        (une probabilité domine). Une valeur proche de 0 indique une forte ambiguïté.
+
+        Paramètres
+        ----------
+        series_index : int
+            Ignoré — conservé pour compatibilité avec le contrat BaseRegimeDetector.
+
+        Retourne
+        --------
+        np.ndarray (T,) : indice de confiance ∈ [0, 1] pour chaque date.
+        """
+        if self._fitted_probs is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+
+        probs = self._fitted_probs  # (T, K)
+        K = probs.shape[1]
+
+        # Entropie de Shannon normalisée : H ∈ [0, 1]
+        # On clip pour éviter log(0)
+        log_probs = np.log(np.clip(probs, 1e-12, 1.0))
+        entropy = -np.sum(probs * log_probs, axis=1)          # (T,)
+        max_entropy = np.log(K)                                # entropie max = log(K) (uniforme)
+        normalized_entropy = entropy / max_entropy             # (T,) ∈ [0, 1]
+
+        return 1.0 - normalized_entropy                        # (T,) ∈ [0, 1]
