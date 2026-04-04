@@ -8,7 +8,8 @@ class HMMDetector(BaseRegimeDetector):
     HMM Gaussien (Classic Hidden Markov Model) basé sur la librairie ssm (Linderman Lab).
 
     Le modèle est fitté sur des variables d'observation (ex: macro standardisées).
-    Les métriques de régime (moyennes, covariances) sont calculées sur les log returns financiers.
+    Les métriques de régime (moyennes, covariances) sont calculées sur les log returns financiers,
+    en mode statique (empirique par état Viterbi) ou dynamique (EWMA pondéré par les probabilités).
 
     Paramètres
     ----------
@@ -34,10 +35,10 @@ class HMMDetector(BaseRegimeDetector):
         self.kappa = kappa
         self.n_restarts = n_restarts
         self.model = None
-        self._fitted_probs = None       # Cache des probabilités lissées (in-sample)
-        self.viterbi_states = None      # Séquence d'états la plus probable (Viterbi)
-        self._observations_fitted = None  # Observations d'entraînement (ex: macro)
-        self._log_returns_fitted = None   # Log returns financiers alignés sur le fit
+        self._fitted_probs = None           # Cache des probabilités lissées (in-sample)
+        self.viterbi_states = None          # Séquence d'états la plus probable (Viterbi)
+        self._observations_fitted = None    # Observations d'entraînement (ex: macro)
+        self._log_returns_fitted = None     # Log returns financiers alignés sur le fit
 
     # ------------------------------------------------------------------
     # Méthode privée : instanciation du modèle SSM
@@ -60,6 +61,65 @@ class HMMDetector(BaseRegimeDetector):
                 transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
             )
         return ssm.HMM(self.n_states, D, observations="gaussian")
+
+    # ------------------------------------------------------------------
+    # Méthode privée : résolution des log returns
+    # ------------------------------------------------------------------
+
+    def _resolve_log_returns(self, log_returns: np.ndarray = None) -> np.ndarray:
+        """
+        Résout les log returns à utiliser : argument explicite ou cache du fit.
+
+        Paramètres
+        ----------
+        log_returns : np.ndarray ou None
+
+        Retourne
+        --------
+        np.ndarray (T, D)
+        """
+        if log_returns is not None:
+            return np.array(log_returns, dtype=float)
+        if self._log_returns_fitted is not None:
+            return self._log_returns_fitted
+        raise ValueError(
+            "Aucun log_returns disponible. "
+            "Passez log_returns au fit() ou directement à cette méthode."
+        )
+
+    # ------------------------------------------------------------------
+    # Méthode privée : calcul des poids EWMA
+    # ------------------------------------------------------------------
+
+    def _ewma_weights(self, t: int, regime_probs: np.ndarray, halflife: int) -> np.ndarray:
+        """
+        Calcule les poids EWMA combinés pour le régime k jusqu'à l'instant t.
+
+        Poids = décroissance exponentielle × probabilité d'être dans le régime k.
+
+        Paramètres
+        ----------
+        t : int
+            Instant courant (exclusif).
+        regime_probs : np.ndarray (t, K)
+            Probabilités de régime jusqu'à t.
+        halflife : int
+            Demi-vie en mois pour la décroissance EWMA.
+
+        Retourne
+        --------
+        np.ndarray (t, K) : poids normalisés pour chaque régime.
+        """
+        alpha = 1 - np.exp(-np.log(2) / halflife)
+        decay = np.array([(1 - alpha) ** i for i in range(t)])[::-1]  # (t,)
+
+        # Poids combinés : décroissance × probabilité de régime
+        w = decay[:, None] * regime_probs[:t]  # (t, K)
+
+        # Normalisation par régime
+        w_sum = w.sum(axis=0, keepdims=True)  # (1, K)
+        w_sum = np.where(w_sum < 1e-8, 1.0, w_sum)
+        return w / w_sum  # (t, K)
 
     # ------------------------------------------------------------------
     # fit
@@ -138,79 +198,127 @@ class HMMDetector(BaseRegimeDetector):
         return self._fitted_probs
 
     # ------------------------------------------------------------------
-    # regime_covariances — sur les log returns, pas les observations macro
+    # regime_covariances — statique ou dynamique EWMA
     # ------------------------------------------------------------------
 
-    def regime_covariances(self, log_returns: np.ndarray = None):
+    def regime_covariances(self, log_returns: np.ndarray = None,
+                           use_ewma: bool = True,
+                           halflife: int = 24):
         """
-        Retourne les matrices de covariance empiriques des log returns par régime — shape (K, D, D).
+        Retourne les matrices de covariance des log returns par régime.
 
-        Les covariances sont calculées sur les log returns financiers conditionnellement
-        aux états Viterbi, et non sur les observations macro du HMM.
+        Mode statique (use_ewma=False) :
+            Covariances empiriques fixes par état Viterbi — shape (K, D, D).
+            Cas statique au sens de base.py : paramètres fixes estimés lors du fit.
+
+        Mode dynamique EWMA (use_ewma=True) :
+            Covariances EWMA pondérées par les probabilités de régime — shape (T, K, D, D).
+            Cas dynamique au sens de base.py : séquence temporelle des matrices.
+            Chaque matrice C[t, k] est estimée sur l'historique jusqu'à t,
+            pondéré exponentiellement et par P(z_t = k).
 
         Paramètres
         ----------
-        log_returns : np.ndarray, optionnel
-            Log returns financiers (T, D). Si None, utilise ceux stockés lors du fit.
+        log_returns : np.ndarray, optionnel (T, D)
+            Log returns financiers. Si None, utilise ceux stockés lors du fit.
+        use_ewma : bool
+            True → mode dynamique EWMA, False → mode statique empirique.
+        halflife : int
+            Demi-vie en mois pour la décroissance EWMA (utilisé si use_ewma=True).
         """
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
 
         lr = self._resolve_log_returns(log_returns)
-
+        T, D = lr.shape
         K = self.n_states
-        D = lr.shape[1]
-        covs = []
 
-        for k in range(K):
-            mask = (self.viterbi_states == k)
-            subset = lr[mask]
-            if subset.shape[0] < 2:
-                covs.append(np.eye(D))
-            else:
-                covs.append(np.cov(subset.T, ddof=1))
+        if not use_ewma:
+            # Mode statique : covariance empirique par état Viterbi
+            covs = []
+            for k in range(K):
+                mask = (self.viterbi_states == k)
+                subset = lr[mask]
+                covs.append(np.cov(subset.T, ddof=1) if subset.shape[0] >= 2 else np.eye(D))
+            return covs
 
-        return covs
+        # Mode dynamique EWMA — shape (T, K, D, D)
+        covs_dynamic = np.zeros((T, K, D, D))
+
+        for t in range(1, T):
+            w = self._ewma_weights(t, self._fitted_probs, halflife)  # (t, K)
+
+            for k in range(K):
+                w_k = w[:, k]  # (t,)
+
+                # Moyenne pondérée
+                mu_k = (lr[:t] * w_k[:, None]).sum(axis=0)
+
+                # Covariance pondérée
+                diff = lr[:t] - mu_k
+                covs_dynamic[t, k] = (diff * w_k[:, None]).T @ diff
+
+        return covs_dynamic
 
     # ------------------------------------------------------------------
-    # regime_means — sur les log returns, pas les observations macro
+    # regime_means — statique ou dynamique EWMA
     # ------------------------------------------------------------------
 
-    def regime_means(self, log_returns: np.ndarray = None):
+    def regime_means(self, log_returns: np.ndarray = None,
+                     use_ewma: bool = True,
+                     halflife: int = 24):
         """
-        Retourne les moyennes empiriques des log returns par régime — shape (K, D).
+        Retourne les moyennes des log returns par régime.
 
-        Les moyennes sont calculées sur les log returns financiers conditionnellement
-        aux états Viterbi, et non sur les observations macro du HMM.
+        Mode statique (use_ewma=False) :
+            Moyennes empiriques fixes par état Viterbi — shape (K, D).
+
+        Mode dynamique EWMA (use_ewma=True) :
+            Moyennes EWMA pondérées par les probabilités de régime — shape (T, K, D).
 
         Paramètres
         ----------
-        log_returns : np.ndarray, optionnel
-            Log returns financiers (T, D). Si None, utilise ceux stockés lors du fit.
+        log_returns : np.ndarray, optionnel (T, D)
+            Log returns financiers. Si None, utilise ceux stockés lors du fit.
+        use_ewma : bool
+            True → mode dynamique EWMA, False → mode statique empirique.
+        halflife : int
+            Demi-vie en mois pour la décroissance EWMA (utilisé si use_ewma=True).
         """
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
 
         lr = self._resolve_log_returns(log_returns)
-
+        T, D = lr.shape
         K = self.n_states
-        means = []
 
-        for k in range(K):
-            mask = (self.viterbi_states == k)
-            subset = lr[mask]
-            if subset.shape[0] == 0:
-                means.append(np.zeros(lr.shape[1]))
-            else:
-                means.append(np.mean(subset, axis=0))
+        if not use_ewma:
+            # Mode statique : moyenne empirique par état Viterbi
+            means = []
+            for k in range(K):
+                mask = (self.viterbi_states == k)
+                subset = lr[mask]
+                means.append(np.mean(subset, axis=0) if subset.shape[0] > 0 else np.zeros(D))
+            return means
 
-        return means
+        # Mode dynamique EWMA — shape (T, K, D)
+        means_dynamic = np.zeros((T, K, D))
+
+        for t in range(1, T):
+            w = self._ewma_weights(t, self._fitted_probs, halflife)  # (t, K)
+
+            for k in range(K):
+                w_k = w[:, k]  # (t,)
+                means_dynamic[t, k] = (lr[:t] * w_k[:, None]).sum(axis=0)
+
+        return means_dynamic
 
     # ------------------------------------------------------------------
     # conditional_covariance — délégation à BaseRegimeDetector
     # ------------------------------------------------------------------
 
-    def conditional_covariance(self, probs: np.ndarray, log_returns: np.ndarray = None) -> np.ndarray:
+    def conditional_covariance(self, probs: np.ndarray,
+                                log_returns: np.ndarray = None) -> np.ndarray:
         """
         Calcule la covariance conditionnelle totale via la loi des covariances totales.
 
@@ -280,29 +388,3 @@ class HMMDetector(BaseRegimeDetector):
         if self.model is None:
             raise ValueError("Le modèle n'a pas été entraîné.")
         return np.exp(self.model.transitions.log_Ps)
-
-    # ------------------------------------------------------------------
-    # Méthode privée utilitaire
-    # ------------------------------------------------------------------
-
-    def _resolve_log_returns(self, log_returns: np.ndarray = None) -> np.ndarray:
-        """
-        Résout les log returns à utiliser : argument explicite ou cache du fit.
-
-        Paramètres
-        ----------
-        log_returns : np.ndarray ou None
-
-        Retourne
-        --------
-        np.ndarray (T, D)
-        """
-        if log_returns is not None:
-            lr = np.array(log_returns, dtype=float)
-            return lr
-        if self._log_returns_fitted is not None:
-            return self._log_returns_fitted
-        raise ValueError(
-            "Aucun log_returns disponible. "
-            "Passez log_returns au fit() ou directement à cette méthode."
-        )
