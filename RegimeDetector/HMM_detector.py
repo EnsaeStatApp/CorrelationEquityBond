@@ -449,6 +449,42 @@ class HMMDetector(BaseRegimeDetector):
             raise ValueError("Le modèle n'a pas été entraîné.")
         self.model.transitions.log_Ps = log_Ps.copy()
 
+    def update_transition_params(self, log_Ps: np.ndarray, Ws=None):
+        """
+        Alias de set_transition_params — utilisé par TransitionStatisticalAnalyzer
+        lors des perturbations numériques pour le calcul de la Hessienne.
+
+        Paramètres
+        ----------
+        log_Ps : np.ndarray (K, K) — log-probabilités de transition mises à jour.
+        Ws     : ignoré (pas de covariables dans un HMM standard).
+        """
+        self.set_transition_params(log_Ps, Ws)
+
+    def compute_ll(self, observations_list, inputs_list=None) -> float:
+        """
+        Calcule la log-vraisemblance du modèle sur les observations fournies.
+
+        Utilisé par TransitionStatisticalAnalyzer pour évaluer la LL après
+        perturbation des paramètres de transition (calcul numérique de la Hessienne).
+
+        Paramètres
+        ----------
+        observations_list : list[np.ndarray]
+            Liste contenant un array d'observations (T, D).
+        inputs_list : ignoré — HMM non-conditionnel.
+
+        Retourne
+        --------
+        float : log-vraisemblance du modèle.
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+        obs = np.array(observations_list[0], dtype=float)
+        if obs.ndim == 1:
+            obs = obs[:, None]
+        return self.model.log_probability(obs)
+
     # ------------------------------------------------------------------
     # compute_confidence_index — requise par HMMCoherenceChecker
     # ------------------------------------------------------------------
