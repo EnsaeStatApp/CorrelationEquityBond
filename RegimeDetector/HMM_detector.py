@@ -47,6 +47,8 @@ class HMMDetector(BaseRegimeDetector):
         self.viterbi_states = None          # Séquence d'états la plus probable (Viterbi)
         self._observations_fitted = None    # Observations d'entraînement (ex: macro)
         self._log_returns_fitted = None     # Log returns financiers alignés sur le fit
+        self.fit_observations = None        # Alias liste-wrappé attendu par TransitionStatisticalAnalyzer
+        self.fit_input = None               # Inputs covariables (None pour HMM non-conditionnel)
 
     # ------------------------------------------------------------------
     # Méthode privée : instanciation du modèle SSM
@@ -194,6 +196,8 @@ class HMMDetector(BaseRegimeDetector):
         self.viterbi_states = self.model.most_likely_states(observations)
 
         self._observations_fitted = observations
+        self.fit_observations = [observations]  # format liste attendu par TransitionStatisticalAnalyzer
+        self.fit_input = None                    # HMM non-conditionnel : pas d'inputs
         self.D = D          # dimension des observations (disponible post-fit)
         self.K = self.n_states  # redondant mais garantit la cohérence si n_states change
         self.is_fitted = True
