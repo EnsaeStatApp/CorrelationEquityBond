@@ -31,23 +31,22 @@ class HMMDetector(BaseRegimeDetector):
                  kappa: float = 5.0, n_restarts: int = 10):
         self.n_states = n_states
         self.n_iter = n_iter
-        self.seed = random_state
+        self.random_state = random_state
+        self.seed = random_state            # alias conservé pour compatibilité interne
         self.kappa = kappa
         self.n_restarts = n_restarts
+
+        # Attributs d'interface attendus par TransitionStatisticalAnalyzer / CoherenceChecker
+        self.K = n_states                   # nombre de régimes (alias de n_states)
+        self.D = None                       # dimension des observations (fixée au fit)
+        self.M = 0                          # nombre d'inputs covariables (0 = HMM non-conditionnel)
+
         self.model = None
+        self.is_fitted = False              # booléen simple, mis à True dans fit()
         self._fitted_probs = None           # Cache des probabilités lissées (in-sample)
         self.viterbi_states = None          # Séquence d'états la plus probable (Viterbi)
         self._observations_fitted = None    # Observations d'entraînement (ex: macro)
         self._log_returns_fitted = None     # Log returns financiers alignés sur le fit
-
-    # ------------------------------------------------------------------
-    # Propriété is_fitted — requise par HMMCoherenceChecker
-    # ------------------------------------------------------------------
-
-    @property
-    def is_fitted(self) -> bool:
-        """Retourne True si le modèle a été entraîné (fit() appelé avec succès)."""
-        return self.model is not None and self.viterbi_states is not None
 
     # ------------------------------------------------------------------
     # Méthode privée : instanciation du modèle SSM
@@ -195,6 +194,9 @@ class HMMDetector(BaseRegimeDetector):
         self.viterbi_states = self.model.most_likely_states(observations)
 
         self._observations_fitted = observations
+        self.D = D          # dimension des observations (disponible post-fit)
+        self.K = self.n_states  # redondant mais garantit la cohérence si n_states change
+        self.is_fitted = True
         return self
 
     # ------------------------------------------------------------------
