@@ -412,6 +412,42 @@ class HMMDetector(BaseRegimeDetector):
         return np.exp(self.model.transitions.log_Ps)
 
     # ------------------------------------------------------------------
+    # get_transition_params / set_transition_params
+    # Requis par TransitionStatisticalAnalyzer (save → perturb → restore)
+    # ------------------------------------------------------------------
+
+    def get_transition_params(self):
+        """
+        Retourne les paramètres bruts de transition pour sauvegarde.
+
+        Pour un HMM standard (non-conditionnel), seuls les log-probabilités
+        de transition log_Ps sont des paramètres libres. Il n'y a pas de
+        poids logistiques covariables (Ws = None).
+
+        Retourne
+        --------
+        log_Ps : np.ndarray (K, K) — copie des log-probabilités de transition.
+        Ws     : None — pas de poids covariables pour un HMM non-conditionnel.
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+        log_Ps = self.model.transitions.log_Ps.copy()
+        return log_Ps, None
+
+    def set_transition_params(self, log_Ps: np.ndarray, Ws=None):
+        """
+        Restaure les paramètres de transition (après perturbation numérique).
+
+        Paramètres
+        ----------
+        log_Ps : np.ndarray (K, K) — log-probabilités de transition à restaurer.
+        Ws     : ignoré (pas de covariables dans un HMM standard).
+        """
+        if self.model is None:
+            raise ValueError("Le modèle n'a pas été entraîné.")
+        self.model.transitions.log_Ps = log_Ps.copy()
+
+    # ------------------------------------------------------------------
     # compute_confidence_index — requise par HMMCoherenceChecker
     # ------------------------------------------------------------------
 
