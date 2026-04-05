@@ -28,13 +28,12 @@ class HMMDetector(BaseRegimeDetector):
     """
 
     def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42,
-                 kappa: float = 5.0, n_restarts: int = 10, alpha: float = 1.0):
+                 kappa: float = 5.0, n_restarts: int = 10):
         self.n_states = n_states
         self.n_iter = n_iter
         self.random_state = random_state
         self.seed = random_state            # alias conservé pour compatibilité interne
         self.kappa = kappa
-        self.alpha = alpha
         self.n_restarts = n_restarts
 
         # Attributs d'interface attendus par TransitionStatisticalAnalyzer / CoherenceChecker
@@ -64,12 +63,12 @@ class HMMDetector(BaseRegimeDetector):
         D : int
             Dimension des observations.
         """
-        if self.kappa > 0 or self.alpha != 1.0:
+        if self.kappa > 0:
             return ssm.HMM(
                 self.n_states, D,
                 observations="gaussian",
                 transitions="sticky",
-                transitions_kwargs=dict(alpha=self.alpha, kappa=self.kappa)
+                transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
             )
         return ssm.HMM(self.n_states, D, observations="gaussian")
 
@@ -178,12 +177,9 @@ class HMMDetector(BaseRegimeDetector):
         T, D = observations.shape
 
         # Multi-restart K-Means : on retient le modèle avec la meilleure log-vraisemblance
-        # Les graines sont dérivées de random_state pour que des configurations différentes
-        # (random_state, n_restarts) explorent des espaces distincts.
         best_ll = -np.inf
 
-        for i in range(self.n_restarts):
-            seed = self.random_state + i   # ancré sur random_state, pas toujours 0,1,2,...
+        for seed in range(self.n_restarts):
             np.random.seed(seed)
             candidate = self._build_model(D)
             candidate.fit(observations, method="em", num_iters=self.n_iter,
