@@ -77,13 +77,24 @@ class EmissionStatisticalAnalyzer:
 
         pvals = df["p_value"].values
 
-        if correction == "bonferroni": # pour bonferroni, il faut que la p-value soit inf à alpha/nbr de tests
-            reject, pvals_corrected, _, _ = multipletests(pvals, alpha=alpha, method='bonferroni')
-        elif correction == "fdr":  # pour fdr, la p-value corrigée devient p_old * nbr de tests/rang
-            reject, pvals_corrected, _, _ = multipletests(pvals, alpha=alpha, method='fdr_bh')
-        else:
-            pvals_corrected = pvals
-            reject = pvals < alpha
+        # Les lignes avec NaN (régimes trop petits pour le test) sont exclues de la correction
+        # puis réintégrées avec p_adjusted=NaN et significant=False
+        valid_mask = ~np.isnan(pvals)
+        pvals_corrected = np.full(len(pvals), np.nan)
+        reject = np.zeros(len(pvals), dtype=bool)
+
+        if valid_mask.sum() > 0:
+            pvals_valid = pvals[valid_mask]
+            if correction == "bonferroni":
+                rej_v, pvals_v_corr, _, _ = multipletests(pvals_valid, alpha=alpha, method='bonferroni')
+            elif correction == "fdr":
+                rej_v, pvals_v_corr, _, _ = multipletests(pvals_valid, alpha=alpha, method='fdr_bh')
+            else:
+                pvals_v_corr = pvals_valid
+                rej_v = pvals_valid < alpha
+
+            pvals_corrected[valid_mask] = pvals_v_corr
+            reject[valid_mask] = rej_v
 
         df["p_adjusted"] = pvals_corrected
         df["significant"] = reject
@@ -174,6 +185,10 @@ class EmissionStatisticalAnalyzer:
             - r2 : corrélation du régime 2
             - n2 : taille du régime 2
             """
+            # Le test requiert n > 3 pour chaque régime (dénominateur 1/(n-3))
+            # Si un régime est trop peu peuplé, le test n'est pas calculable → NaN
+            if n1 <= 3 or n2 <= 3:
+                return np.nan, np.nan
             z1 = _fisher_z(r1)
             z2 = _fisher_z(r2)
             se = np.sqrt(1.0 / (n1 - 3) + 1.0 / (n2 - 3)) # erreur standard
