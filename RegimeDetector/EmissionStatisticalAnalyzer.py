@@ -27,6 +27,19 @@ class EmissionStatisticalAnalyzer:
         self.asset_names = asset_names or [f"Asset_{i}" for i in range(self.D)]
         self.regimes = np.unique(states)
 
+    @staticmethod
+    def _safe_corrcoef(Y: np.ndarray) -> np.ndarray:
+        """
+        Calcule la matrice de corrélation en gérant le cas où un actif a une std nulle
+        (régime avec trop peu d'observations identiques). Les paires impliquant un actif
+        à variance nulle reçoivent NaN au lieu de provoquer un RuntimeWarning.
+        """
+        with np.errstate(invalid='ignore', divide='ignore'):
+            C = np.corrcoef(Y, rowvar=False)
+        # Remplacer les NaN diagonaux par 1 (corrélation d'un actif avec lui-même)
+        np.fill_diagonal(C, 1.0)
+        return C
+
     def descriptive_stats(self):
         """
         Renvoie la description purement statistiques de chacun des régimes (i.e. un régime est décrit par les stats de chacun des actifs dans celui-ci)
@@ -40,7 +53,7 @@ class EmissionStatisticalAnalyzer:
                 "n": n,
                 "mean": np.mean(Yk, axis=0),
                 "std": np.std(Yk, axis=0, ddof=1),
-                "corr": np.corrcoef(Yk, rowvar=False),
+                "corr": self._safe_corrcoef(Yk),
                 "cov": np.cov(Yk, rowvar=False),
                 "asset_names": self.asset_names,
             }
@@ -239,7 +252,7 @@ class EmissionStatisticalAnalyzer:
                 idx = rng.choice(nk, size=nk, replace=True) # on pioche n_k observations dans le régime k avec remise
                 Yb = Yk[idx] # les logs returns pour chaque tirage
                 vol_samples[b] = np.std(Yb, axis=0, ddof=1) # vol divisée par n-1
-                C = np.corrcoef(Yb, rowvar=False) # matrice de correl
+                C = self._safe_corrcoef(Yb) # matrice de correl
                 for p_idx, (i, j) in enumerate(pair_keys):
                     corr_samples[b, p_idx] = C[i, j]
 
@@ -258,7 +271,7 @@ class EmissionStatisticalAnalyzer:
 
             # corréls
             corr_ci = {}
-            C_full = np.corrcoef(Yk, rowvar=False)
+            C_full = self._safe_corrcoef(Yk)
             for p_idx, (i, j) in enumerate(pair_keys):
                 label = f"{self.asset_names[i]} / {self.asset_names[j]}"
                 corr_ci[label] = {
