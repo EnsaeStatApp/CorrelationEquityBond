@@ -225,7 +225,7 @@ class HMMDetector(BaseRegimeDetector):
 
     def regime_covariances(self, log_returns: np.ndarray = None,
                            use_ewma: bool = True,
-                           halflife: int = 24):
+                           halflife: int = 60):
         """
         Retourne les matrices de covariance des log returns par régime.
 
