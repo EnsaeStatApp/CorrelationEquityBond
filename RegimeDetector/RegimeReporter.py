@@ -46,23 +46,36 @@ class RegimeReporter:
 
     def _shade_regimes(self, ax):
         """
-        Ajoute le fond coloré selon la séquence d'états (méthode privée)
+        Ajoute le fond coloré selon la séquence d'états.
+        Utilise les milieux d'intervalles entre dates pour éviter tout gap.
         """
-        # On trouve les indices où le régime change
+        dates = self.dates
+        n = len(dates)
         changes = np.where(self.states[:-1] != self.states[1:])[0]
-        # On ajoute le début et la fin
-        splits = np.concatenate(([0], changes + 1, [len(self.states)]))
-
+        splits = np.concatenate(([0], changes + 1, [n]))
+    
         for i in range(len(splits) - 1):
             start_idx = splits[i]
-            end_idx = splits[i+1] - 1
+            end_idx = splits[i + 1] - 1
             regime = self.states[start_idx]
+    
+            # Borne gauche : milieu entre date précédente et date courante
+            if start_idx == 0:
+                x0 = dates[0] - (dates[1] - dates[0]) / 2
+            else:
+                x0 = dates[start_idx] - (dates[start_idx] - dates[start_idx - 1]) / 2
+    
+            # Borne droite : milieu entre date courante et date suivante
+            if end_idx == n - 1:
+                x1 = dates[-1] + (dates[-1] - dates[-2]) / 2
+            else:
+                x1 = dates[end_idx] + (dates[end_idx + 1] - dates[end_idx]) / 2
 
-            ax.axvspan(self.dates[start_idx], self.dates[end_idx],
-                       alpha=0.25,
-                       color=self.regime_colors.get(regime, "gray"),
-                       linewidth=0, zorder=0)
-
+        ax.axvspan(x0, x1,
+                   alpha=0.25,
+                   color=self.regime_colors.get(regime, "gray"),
+                   linewidth=0,
+                   zorder=0)
     def _regime_patches(self):
         """"
         Génère les labels pour la légende dynamiquement selon K (méthode privée)
