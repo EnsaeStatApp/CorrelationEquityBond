@@ -155,44 +155,41 @@ class RegimeReporter:
 
 
 
-    def plot_wealth_index(self, figsize : Tuple[int, int]=(16, 5), savepath : str = None):
-        """
-        Génère le graphique de la performance cumulée du S&P sur fond de régimes
-
-        Paramètres :
-        - figsize : taille de la figure
-        - savepath : chemin pour enregistrer l'image
-        """
+    def plot_wealth_index(self, figsize=(16, 5), savepath=None):
         fig, ax = plt.subplots(figsize=figsize)
         self._shade_regimes(ax)
-        log_ret = self.log_returns[:, 0]
-        line_colors = ["#2c3e50", "#8e44ad", "#16a085", "#d35400"]
-
-        # on ne trace que pour S&P. TO DO : vérifier que c'est bien l'index 0
-        scale_factor = 1.0
-        if np.abs(log_ret).mean() > 0.1: # echelle pourcentage donc on va diviser pour l'échelle
-            scale_factor = 100.0
-        wealth = 100 * np.exp(np.cumsum(self.log_returns[:, 0])/scale_factor)
-        ax.plot(self.dates, wealth, color=line_colors[0 % len(line_colors)],
-                linewidth=1.8, zorder=3, label=self.asset_names[0])
-
+    
+        series = self.log_returns[:, 0].copy()
+    
+        # Détection automatique : niveau de prix vs log returns
+        if np.abs(series).mean() > 1.0:
+            # Niveau de prix → normalisation base 100
+            wealth = 100 * series / series[0]
+        else:
+            # Log returns en % → conversion décimal
+            if np.abs(series).mean() > 0.1:
+                series = series / 100.0
+            wealth = 100 * np.exp(np.cumsum(series))
+    
+        ax.plot(self.dates, wealth, color="#2c3e50", linewidth=1.8,
+                zorder=3, label=self.asset_names[0])
+    
         ax.set_yscale("log")
         ax.yaxis.set_major_formatter(mticker.ScalarFormatter())
         ax.yaxis.set_minor_formatter(mticker.NullFormatter())
         ax.axhline(100, color="black", linewidth=0.5, linestyle="--", alpha=0.4)
-
         ax.set_ylabel("Indice de richesse (base 100, log)", fontsize=12)
         ax.set_title("Indice de richesse — par régime", fontsize=14, fontweight="bold")
-
+    
         patches = self._regime_patches()
         handles, _ = ax.get_legend_handles_labels()
         ax.legend(handles=patches + handles, loc="upper left", fontsize=9, framealpha=0.9, ncol=3)
-
+    
         self._annotate_events(ax)
         self._format_xaxis(ax)
         ax.grid(axis="y", alpha=0.3, which="major")
         plt.tight_layout()
-
+    
         if savepath:
             fig.savefig(savepath, dpi=150, bbox_inches="tight")
         plt.show()
