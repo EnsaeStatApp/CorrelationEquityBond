@@ -13,11 +13,32 @@ class RegimeDetector(ABC):
     - Renvoyer les matrices de covariance dans chaque régime
 
     But : Eviter qu'un detecteur de régime n'implémente pas ces méthodes essentielles, ou sous d'autres noms
-    NB : penser à bien garder un init commun (fit_observations, fit_inputs)
+    
     """
 
+    def __init__(self, n_regimes: int, n_dim: int, n_input: int = 0, random_state: int = 42):
+        """
+        Paramètres : 
+        - n_regimes : nombre de régimes
+        - n_dim : nombres d'actifs
+        - n_input (optionnel) : nombre de covariables/inputs pouvant impacter les transitions
+        - random_state (optionnel) : seed sur lequel on travaille
+
+        NB : la classe en question devra rajouter l'attribut self.model
+        """
+        self.K = n_regimes
+        self.D = n_dim
+        self.M = n_input
+        self.random_state = random_state
+        
+        self.is_fitted = False
+        self.viterbi_states = None
+        self.fit_observations = None
+        self.fit_input = None
+
     @abstractmethod
-    def fit(self, observations : List[np.ndarray], inputs : List[np.ndarray] = None, log_returns : List[np.ndarray] = None):
+    def fit(self, observations : List[np.ndarray], inputs : List[np.ndarray] = None, log_returns : List[np.ndarray] = None,
+            initialize: bool = True, init_method : str = "kmeans", num_iters: int = 200, ):
         """
         Fit le modèle HMM sur les données
 
@@ -25,6 +46,9 @@ class RegimeDetector(ABC):
         - observations : liste des tableaux des observations des HMMs (dans notre cas, une liste de taille 1)
         - inputs : list des tableaux de covariables pouvant impacter les transitions
         - log_returns : log returns de nos actifs (None si sont déjà dans observations)
+        - initialize : True si on initialise les paramètres, sinon par défaut
+        - init_method : méthode d'initialisation (défaut kmeans)
+
         """
         pass
 
@@ -100,3 +124,16 @@ class RegimeDetector(ABC):
         - log_returns : tableaux des log returns 
         """
         pass
+
+    @abstractmethod 
+    def get_params(self):
+        """
+        Renvoie les paramètres du modèle (Init + Trans + Obs)
+        """
+        pass
+
+    @abstractmethod 
+    def set_params(self, params):
+        """
+        Injecte des paramètres dans le modèle
+        """

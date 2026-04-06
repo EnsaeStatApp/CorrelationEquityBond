@@ -47,7 +47,7 @@ class HMMMarketWithMacroTransitionsRegimeDetector(HMMMarketRegimeDetector):
         print("-" * 62)
 
     def fit(self, observations : List[np.ndarray], inputs : List[np.ndarray], log_returns : List[np.ndarray] = None, asset_names : List[str] = None, feature_names : List[str] = None, series_index : int = 0,
-            num_iters : int = 200, tolerance : float = 1e-4, method : str = "em", warm_start : bool = True):
+            num_iters : int = 200, tolerance : float = 1e-4, method : str = "em", warm_start : bool = True, initialize : bool = True, init_method: str = "kmeans"):
         """
         Fit le modèle.
         Lorsque warm_start=True, pour initialiser les paramètres d'émission, on lance un HMM sur les séries de
@@ -86,7 +86,7 @@ class HMMMarketWithMacroTransitionsRegimeDetector(HMMMarketRegimeDetector):
             print("Initialisation : Fit du HMM stationnaire...")
             np.random.seed(self.random_state)
             simple_hmm.fit(observations, method=method, num_iters=num_iters,
-                           init_method="kmeans", verbose=0, tolerance=tolerance)
+                           init_method=init_method, verbose=0, tolerance=tolerance, initialize=initialize)
 
             # 2. Affichage des stats de validation (pour vérifier l'initialisation à vue d'oeil)
             initial_states = simple_hmm.most_likely_states(observations[series_index])
@@ -125,15 +125,17 @@ class HMMMarketWithMacroTransitionsRegimeDetector(HMMMarketRegimeDetector):
 
             Y_to_fit = observations
             X_to_fit = inputs
+            final_initialize = False
         else:
+            final_initialize = initialize
             Y_to_fit = observations
             X_to_fit = inputs
 
         # 7. Fit final du modèle Macro
         np.random.seed(self.random_state)
         self.model.fit(Y_to_fit, inputs=X_to_fit, method=method, num_iters=num_iters,
-                       init_method="kmeans", verbose=0, tolerance=tolerance,
-                       initialize=not warm_start)
+                       init_method=init_method, verbose=0, tolerance=tolerance,
+                       initialize=final_initialize)
 
         self.is_fitted = True
         self.fit_observations = Y_to_fit
