@@ -68,7 +68,7 @@ class HMMDetector(BaseRegimeDetector):
                 self.n_states, D,
                 observations="gaussian",
                 transitions="sticky",
-                transitions_kwargs=dict(alpha=1.0, kappa=self.kappa)
+                transition_kwargs=dict(alpha=1.0, kappa=self.kappa)
             )
         return ssm.HMM(self.n_states, D, observations="gaussian")
 
