@@ -183,7 +183,7 @@ class RegimeReporter:
     
         patches = self._regime_patches()
         handles, _ = ax.get_legend_handles_labels()
-        ax.legend(handles=patches + handles, loc="upper left", fontsize=9, framealpha=0.9, ncol=3)
+        ax.legend(handles=patches + handles, loc="upper left", fontsize=12, framealpha=0.9, ncol=3)
     
         self._annotate_events(ax)
         self._format_xaxis(ax)
@@ -228,7 +228,7 @@ class RegimeReporter:
         # Légende combinée
         patches = self._regime_patches()
         handles, _ = ax.get_legend_handles_labels()
-        ax.legend(handles=patches + handles, loc="lower left", fontsize=9, framealpha=0.9, ncol=3)
+        ax.legend(handles=patches + handles, loc="lower left", fontsize=12, framealpha=0.9, ncol=3)
 
         self._format_xaxis(ax)
         ax.grid(axis="y", alpha=0.3)
