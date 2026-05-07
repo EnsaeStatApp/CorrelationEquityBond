@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from RegimeDetector.HMMMarketRegimeDetector import HMMMarketRegimeDetector
+from src.stock_bond_correlation.models.HMMMarketRegimeDetector import HMMMarketRegimeDetector
 from typing import List
 import ssm
-from RegimeDetector.EmissionStatisticalAnalyzer import EmissionStatisticalAnalyzer
+from src.stock_bond_correlation.diagnostics.statistical_tests.EmissionStatisticalAnalyzer import EmissionStatisticalAnalyzer
 
 
 class HMMMarketWithMacroTransitionsRegimeDetector(HMMMarketRegimeDetector):
