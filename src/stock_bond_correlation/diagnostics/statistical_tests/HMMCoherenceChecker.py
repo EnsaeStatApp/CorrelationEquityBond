@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-from src.stock_bond_correlation.diagnostics.statistical_tests.EmissionStatisticalAnalyzer import EmissionStatisticalAnalyzer
-from src.stock_bond_correlation.diagnostics.statistical_tests import TransitionStatisticalAnalyzer
+from RegimeDetector.EmissionStatisticalAnalyzer import EmissionStatisticalAnalyzer
+from RegimeDetector.TransitionStatisticalAnalyzer import TransitionStatisticalAnalyzer
 from src.stock_bond_correlation.models.base import RegimeDetector
 from typing import List, Dict, Tuple
 from IPython.display import display
