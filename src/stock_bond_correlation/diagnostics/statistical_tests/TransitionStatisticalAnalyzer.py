@@ -6,99 +6,95 @@ from src.stock_bond_correlation.models.base_detector import BaseRegimeDetector
 
 class TransitionStatisticalAnalyzer:
     """
-    Class for performing descriptive statistical tests on a detector's transition parameters.
+    Class that performs descriptive statistical tests on a detector's transition parameters.
 
-    Features:
-    - Extracts transition parameters for each regime (intercepts + macro weights if present).
-    - Computes Standard Errors (SE) for these parameters by numerically approximating 
-      the model's Fisher Information matrix.
-    - Computes the eigenvalues of the Hessian at the optimal point (transition parameters 
-      only) to determine the "shape" of the MLE peak (curvature/stability).
-    - Returns transition matrices associated with covariates (time-varying) or constants.
-    - Calculates the expected average duration of each regime.
+    - Returns the transition parameters for each regime (intercept + weights associated with covariates if present).
+    - Returns the standard errors associated with these parameters by numerically calculating the model's Fisher information.
+    - Returns the eigenvalues of the Hessian at the optimal point (only on transition parameters for simplicity) 
+      to determine the "shape of the MLE peak".
+    - Returns transition matrices associated with covariates if present; otherwise, they are constant.
+    - Returns the expected duration of each regime linked to a transition matrix.
     """
 
     def __init__(self, detector: BaseRegimeDetector):
         """
-        Initializes the analyzer with a regime detector.
-
-        Args:
-            detector (BaseRegimeDetector): A general regime detector instance.
+        Parameters:
+        -----------
+        detector : BaseRegimeDetector
+            A general regime detector (assumes detector.fit_data contains log returns).
         """
         self.detector = detector
         self.K = detector.K
         self.M = detector.M
 
-    def compute_transition_inference(self, covariate_names: List[str] = None, series_index: int = 0, 
-                                     alpha: float = 0.05, ref_idx: int = 0, epsilon: float = 1e-4):
+    def compute_transition_inference(self, covariate_names: List[str] = None, series_index: int = 0, alpha: float = 0.05,
+                                     ref_idx: int = 0, epsilon: float = 1e-4):
         """
-        Computes uncertainties for transition probabilities (intercepts and macro weights).
+        Calculates uncertainties on covariate weights concerning transition probabilities.
 
-        The Fisher Information matrix is computed by approximating the Log-Likelihood 
-        Hessian using finite differences.
+        This is done by calculating the Fisher information, approximating the Hessian of the LL via finite differences.
 
-        Args:
-            covariate_names (List[str], optional): Names of exogenous covariates.
-            series_index (int): Index of the data sequence to analyze.
-            alpha (float): Significance threshold for p-values.
-            ref_idx (int): Reference regime index for parameter centering/identification.
-            epsilon (float): Step size for finite difference approximation.
-
-        Returns:
-            tuple: (DataFrame of coefficients/p-values, dictionary of spectral diagnostics).
+        Parameters:
+        -----------
+        covariate_names : List[str], optional
+            Names of the covariates.
+        series_index : int
+            Index of the series to analyze parameters on (reminder: self.detector.fit_data is a list of log returns arrays).
+        alpha : float
+            Significance threshold.
+        ref_idx : int
+            Reference regime index used to evaluate significance.
+        epsilon : float
+            Finite difference step size.
         """
 
-        # 1. Backup original data to restore the model state after inference
+        # 1. Save data because we want the model to return to its original state at the end
         data = np.array(self.detector.fit_observations[series_index])
         if self.detector.fit_input is not None:
             inp = np.array(self.detector.fit_input[series_index])
         else:
             inp = None
 
-        # 2. Backup current transition parameters
+        # 2. Save current transition parameters because we want the model to return to its original state at the end
         log_Ps_orig, Ws_orig = self.detector.get_transition_params()
 
-        # 3. Parameter centering: reduce parameters by relative comparison to a reference regime
-        # Center intercepts (log_Ps)
-        reference_column = log_Ps_orig[:, [ref_idx]] 
+        # 3. Here, we center the parameters around a reference regime
+        reference_column = log_Ps_orig[:, [ref_idx]]  # Take the column of the regime in question (using list to keep K*1 matrix)
         log_Ps_centered = log_Ps_orig - reference_column
         log_Ps_r = np.delete(log_Ps_centered, ref_idx, axis=1)
 
-        # Center macro weights (Ws)
-        reference_row = Ws_orig[[ref_idx], :] 
-        Ws_centered = Ws_orig - reference_row
+        reference_column = Ws_orig[[ref_idx], :]  # Same approach
+        Ws_centered = Ws_orig - reference_column
         Ws_r = np.delete(Ws_centered, ref_idx, axis=0)
 
         n_logPs = self.K * (self.K - 1)
-        p_red = n_logPs + (self.K - 1) * self.M # Reduced parameter count
-        # Flatten parameters into a single theta vector for Hessian calculation
-        params_opt = np.concatenate([log_Ps_r.flatten(), Ws_r.flatten()]) 
+        p_red = n_logPs + (self.K - 1) * self.M  # Number of reduced parameters compared to the reference regime
+        params_opt = np.concatenate([log_Ps_r.flatten(), Ws_r.flatten()])  # To compute the Hessian, flatten parameters into 2 lists then concatenate into a large theta variable
 
-        # 4. Helper function to compute LL from a flat parameter vector
+        # 4. Log-Likelihood (LL) function
         def get_ll(params_flat: np.ndarray):
             """
-            Maps a flat parameter vector back to log_Ps/Ws and computes the Log-Likelihood.
+            Takes a parameter vector, reconstructs log_Ps and Ws, and computes the LL.
 
-            Args:
-                params_flat (np.ndarray): Flattened parameter vector.
+            Parameter:
+            ----------
+            params_flat : np.ndarray
+                Vector of parameters.
             """
             lP_r = params_flat[:n_logPs].reshape(self.K, self.K - 1)
             W_r = params_flat[n_logPs:].reshape(self.K - 1, self.M)
 
-            # Reconstruct full matrices by re-inserting the reference column/row (zeros)
             lP_f = np.concatenate([lP_r[:, :ref_idx], np.zeros((self.K, 1)), lP_r[:, ref_idx:]], axis=1)
             W_f = np.concatenate([W_r[:ref_idx, :], np.zeros((1, self.M)), W_r[ref_idx:, :]], axis=0)
 
-            # Update parameters and compute LL via the detector wrapper
-            self.detector.update_transition_params(lP_f, W_f) 
-            return self.detector.compute_ll([data], [inp]) 
+            self.detector.update_transition_params(lP_f, W_f)  # Update via wrapper
 
-        # 5. Compute the Hessian via second-order centered finite differences
+            return self.detector.compute_ll([data], [inp])  # Compute LL via wrapper
+
+        # 5. Hessian calculation via finite differences (second-order centered finite difference)
         ll_base = get_ll(params_opt)
         H = np.zeros((p_red, p_red))
-        
-        # Diagonal elements
-        for i in range(p_red): 
+        for i in range(p_red):  # Diagonal
             p_plus = params_opt.copy()
             p_plus[i] += epsilon
             p_minus = params_opt.copy()
@@ -106,11 +102,10 @@ class TransitionStatisticalAnalyzer:
             ll_p = get_ll(p_plus)
             ll_m = get_ll(p_minus)
 
-            H[i, i] = (ll_p - 2 * ll_base + ll_m) / (epsilon ** 2)
+            H[i, i] = (ll_p - 2 * ll_base + ll_m) / (epsilon ** 2)  # Centered difference formula
 
-        # Cross-partial derivatives
-        for i in range(p_red): 
-            for j in range(i + 1, p_red): 
+        for i in range(p_red):  # Cross terms
+            for j in range(i + 1, p_red):  # Start at i+1 because H is symmetric
                 p_pp = params_opt.copy()
                 p_pp[i] += epsilon
                 p_pp[j] += epsilon
@@ -123,33 +118,35 @@ class TransitionStatisticalAnalyzer:
                 p_mp = params_opt.copy()
                 p_mp[i] -= epsilon
                 p_mp[j] += epsilon
-                val = (get_ll(p_pp) - get_ll(p_pm) - get_ll(p_mp) + get_ll(p_mm)) / (4 * epsilon ** 2)
+                val = (get_ll(p_pp) - get_ll(p_pm) - get_ll(p_mp) + get_ll(p_mm)) / (4 * epsilon ** 2)  # Centered difference formula
                 H[i, j], H[j, i] = val, val
 
-        # Restore initial parameters to the model
-        self.detector.update_transition_params(log_Ps_orig, Ws_orig)  
+        self.detector.update_transition_params(log_Ps_orig, Ws_orig)  # Restore initial parameters
 
-        # 6. Spectral analysis (for numerical stability) and Matrix Inversion
-        I_obs = - H # Observed Fisher Information
+        # 6. Spectral analysis (for numerical stability) and matrix inversion
+        I_obs = -H
         eigvals = np.linalg.eigvalsh(I_obs)
         cond_num = eigvals.max() / (np.abs(eigvals.min()) + 1e-12)
 
-        try: 
-            I_inv = np.linalg.inv(I_obs) # Variance-Covariance Matrix
-        except np.linalg.LinAlgError:
-            I_inv = np.linalg.pinv(I_obs) # Use pseudo-inverse if non-invertible
+        try:  # Attempt standard inversion
+            I_inv = np.linalg.inv(I_obs)
+        except np.linalg.LinAlgError:  # Fallback to pseudo-inverse
+            I_inv = np.linalg.pinv(I_obs)
 
-        # 7. Standard Error calculation and Significance Testing
+        # 7. Standard errors calculation
         se = np.sqrt(np.maximum(np.diag(I_inv), 1e-12))
-        se_lPs_r = se[:n_logPs].reshape(self.K, self.K - 1)
         se_Ws_r = se[n_logPs:].reshape(self.K - 1, self.M)
+        se_lPs_r = se[:n_logPs].reshape(self.K, self.K - 1)
 
-        # Final preparation of results
+        z_Ws = Ws_r / se_Ws_r
+        pv_Ws = 2 * sp_stats.norm.sf(np.abs(z_Ws))
+
+        # Prepare final dataframe
         rows = []
         regimes_dest = [r for r in range(self.K) if r != ref_idx]
         cov_names = covariate_names or [f"X{m}" for m in range(self.M)]
 
-        # A. Transition Intercepts (Base Probabilities)
+        # A. Add Intercepts (log_Ps)
         for i, k_origin in enumerate(range(self.K)):
             for j, k_dest in enumerate(regimes_dest):
                 coef = log_Ps_r[i, j]
@@ -161,10 +158,10 @@ class TransitionStatisticalAnalyzer:
                     'Transition': f"R{k_origin} -> R{k_dest}",
                     'Variable': 'Base_Prob',
                     'Coef': coef, 'Std_Err': stderr, 'P_Value': pval,
-                    'Significant': pval < alpha
+                    'Significatif': pval < alpha
                 })
 
-        # B. Macro Weights (Impact of drivers on transitions)
+        # B. Add Macro Weights (Ws)
         for i, k_dest in enumerate(regimes_dest):
             for m in range(self.M):
                 coef = Ws_r[i, m]
@@ -173,33 +170,25 @@ class TransitionStatisticalAnalyzer:
                 pval = 2 * sp_stats.norm.sf(np.abs(z))
                 rows.append({
                     'Type': 'Macro_Weight',
-                    'Transition': f"To R{k_dest} (vs R{ref_idx})",
+                    'Transition': f"Vers R{k_dest} (vs R{ref_idx})",
                     'Variable': cov_names[m],
                     'Coef': coef, 'Std_Err': stderr, 'P_Value': pval,
-                    'Significant': pval < alpha
+                    'Significatif': pval < alpha
                 })
 
         return pd.DataFrame(rows), {'eigvals': eigvals, 'cond_num': cond_num}
 
-
     def get_transition_matrix(self, inputs: np.ndarray = None, mode: str = "average"):
         """
-        Calculates the transition matrix based on the specified mode.
-
-        Args:
-            inputs (np.ndarray, optional): Exogenous inputs for time-varying matrices.
-            mode (str): Aggregation method ('average', 'last', or 'all').
-
-        Returns:
-            np.ndarray: Transition matrix (K, K) or array of matrices (T, K, K).
+        Calculates the transition matrix.
         """
         matrices = self.detector.get_transition_matrices(inputs)
 
-        # ADJUSTMENT: If the detector returns a single matrix (K, K) instead of a stack (T, K, K)
+        # ADJUSTMENT: If the detector returns a single matrix (K, K) instead of (T, K, K)
         if matrices.ndim == 2:
-            return matrices  
+            return matrices  # Already a matrix, nothing to average!
 
-        # If a temporal stack (T, K, K), apply aggregation logic
+        # If it's a stack (T, K, K), apply the requested logic
         if mode == "average":
             return np.mean(matrices, axis=0)
         elif mode == "last":
@@ -211,38 +200,34 @@ class TransitionStatisticalAnalyzer:
 
     def get_expected_durations(self, transition_matrix: np.ndarray):
         """
-        Calculates the expected duration in each regime from a transition matrix.
-        
-        Formula: 1 / (1 - P(stay)) (Geometric distribution parameter).
+        Calculates the expected duration in each regime from a matrix A.
+        Formula: 1 / (1 - P(stay)) (geometric distribution with parameter transition_matrix[i, i] for regime i).
 
-        Args:
-            transition_matrix (np.ndarray): Stochastic transition matrix (K x K).
-
-        Returns:
-            np.ndarray: Vector of expected durations.
+        Parameters:
+        -----------
+        transition_matrix : np.ndarray
+            Transition matrix.
         """
         return 1 / (1 - np.diag(transition_matrix))
 
     def get_average_transition_dynamics(self, inputs: np.ndarray = None):
         """
-        Computes transition dynamics: (Average Matrix, Durations, Long-term Frequencies).
+        Returns: (Average Matrix, Durations, Long-Term Frequencies)
 
-        Args:
-            inputs (np.ndarray, optional): Covariates for time-varying models.
-
-        Returns:
-            tuple: (avg_A, durations, stationary_distribution).
+        Parameters:
+        -----------
+        inputs : np.ndarray, optional
+            Arrays of covariates impacting transitions.
         """
-        # 1. Retrieve the average transition matrix
+        # 1. Retrieve the average matrix
         avg_A = self.get_transition_matrix(inputs, mode="average")
 
         # 2. Calculate expected durations
         durations = self.get_expected_durations(avg_A)
 
-        # 3. Calculate the stationary distribution (Long-term frequencies)
-        # Find the left eigenvector associated with the eigenvalue 1
-        vals, vecs = np.linalg.eig(avg_A.T) 
+        # 3. Calculate stationary distribution (Long-Term Frequencies)
+        vals, vecs = np.linalg.eig(avg_A.T)  # Find the left eigenvector associated with eigenvalue 1
         stationary = np.real(vecs[:, np.isclose(vals, 1)])
-        stationary = stationary[:, 0] / stationary.sum() # Normalization
+        stationary = stationary[:, 0] / stationary.sum()  # Normalization
 
         return avg_A, durations, stationary
