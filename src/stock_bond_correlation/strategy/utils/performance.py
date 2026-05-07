@@ -1,4 +1,5 @@
 import numpy as np
+from typing import List
 
 def calculate_net_ret(weights: np.ndarray, prev_weights: np.ndarray, asset_returns_log: np.ndarray,
                       rf_monthly: float, borrow_spread_annual: float, cost_per_trade: float) -> float:
