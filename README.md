@@ -153,6 +153,11 @@ The `StrategySimulator` translates regime probabilities into monthly portfolio w
 | **Maximum Drawdown** | **-11.04%** | -19.13% | -27.00% |
 | **Calmar Ratio** | **0.83** | 0.37 | 0.32 |
 
+**Key Takeaways:**
+* **Superior Risk-Adjusted Returns:** The TVTP model generates a Sharpe ratio > 1.0, significantly outperforming static 60/40.
+* **Dynamic Protection:** By identifying the "Inflationary Stress" regime early, the model halves the Maximum Drawdown compared to a 60/40 portfolio.
+* **Explainable Transitions:** Transitions are not a "black box" but are attributed to macro drivers (Inflation, Yield Curve) via Integrated Gradients.
+  
 ## Installation
 
 ```bash
