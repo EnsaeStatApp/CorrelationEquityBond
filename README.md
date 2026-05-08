@@ -38,7 +38,7 @@
 
 The project answers this in three stages:
 
-1. **Detection.** Fit Hidden Markov Models on financial and macro data to extract latent regimes.
+1. **Detection.** Fit Hidden Markov Models using financial and macro data to extract latent regimes.
 2. **Diagnostics.** Validate the 4-regime structure via a four-pillar coherence framework and attribute transitions to macro drivers using **Integrated Gradients**.
 3. **Allocation.** Translate regime probabilities into a risk-budgeted, proactive portfolio strategy.
 
