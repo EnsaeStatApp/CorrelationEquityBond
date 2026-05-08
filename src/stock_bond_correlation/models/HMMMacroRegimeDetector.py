@@ -3,7 +3,7 @@ import ssm
 from src.stock_bond_correlation.models.base_detector import BaseRegimeDetector
 
 
-class HMMDetector(BaseRegimeDetector):
+class HMMMacroRegimeDetector(BaseRegimeDetector):
     """
     Gaussian HMM (Classic Hidden Markov Model) based on the ssm library (Linderman Lab).
 
