@@ -5,7 +5,7 @@ Lien HMM Market InSample S&P/T-Bond 10y (1970-2025) : <br>
 Lien IOHMM Market InSample S&P/T-Bond 10y (1970-2025) : <br>
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond/blob/main/RegimeDetector/IOHMM_InSample_Regime_Analysis_EquityBond.ipynb) <br>
 Lien HMM Macro InSample S&P/T-Bond 10y - Aaa - Baa (1970-2025) : <br>
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond/blob/main/RegimeDetector/HMM_Macro_Regime_Analysis.ipynb) <br>
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond/blob/main/notebooks/01_Descriptive_Research/HMM_Macro_Regime_Analysis.ipynb) <br>
 Lien backtest HMM Market S&P/T-Bond 10y (1970-2025) :<br>
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond/blob/main/RegimeDetector/HMMMarket_Backtest_EquityBond.ipynb) <br>
 Lien backtest IOHMM Market S&P/T-Bond 10y (1970-2025) :<br>
