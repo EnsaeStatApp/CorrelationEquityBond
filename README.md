@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-orange.svg)](https://jupyter.org/)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/EnsaeStatApp/CorrelationEquityBond)
-[![Status](https://img.shields.io/badge/status-research--in--progress-yellow.svg)]()
+[![Status](https://img.shields.io/badge/status-Finished-yellow.svg)]()
 [![License](https://img.shields.io/badge/license-academic-lightgrey.svg)]()
 
 > The sign and magnitude of the equity–bond correlation are not constant: they regime-switch in response to macroeconomic conditions. This project builds an end-to-end framework — from Hidden Markov regime detection to risk-budgeted asset allocation — to identify, characterize, and exploit those regimes over the 1970–2025 period.
