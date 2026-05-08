@@ -86,10 +86,13 @@ CorrelationEquityBond/
 │   └── dataset.csv                      # Monthly macro + financial dataset (1970–2025)
 │
 ├── notebooks/
-│   └── 01_Descriptive_Research/
-│       ├── HMM_Macro_Regime_Analysis.ipynb                      # Macro-only HMM
-│       ├── HMM_InSample_Regime_Analysis_EquityBond.ipynb        # Market-only HMM
-│       └── HMMTVTP_InSample_Regime_Analysis_EquityBond.ipynb    # TVTP HMM
+│   ├── 01_Descriptive_Research/
+│   │   ├── HMM_Macro_Regime_Analysis.ipynb                      # Macro-only HMM
+│   │   ├── HMM_InSample_Regime_Analysis_EquityBond.ipynb        # Market-only HMM
+│   │   └── HMMTVTP_InSample_Regime_Analysis_EquityBond.ipynb    # TVTP HMM
+│   │
+│   └── 02_WalkForward_Simulation/
+│       └── Walk_Forward_Backtest_Equity_Bond.ipynb              # Walk-forward regime inference & backtest
 │
 ├── src/stock_bond_correlation/
 │   │
