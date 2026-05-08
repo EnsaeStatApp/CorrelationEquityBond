@@ -24,7 +24,7 @@
 - [Roadmap](#roadmap)
 - [Validation Framework](#validation-framework)
 - [Allocation Strategy](#allocation-strategy)
-- [Historical Performance Comparison (1995–2025)](#historical-performance-comparison-1995-2025)
+- [Historical Performance Comparison (1995–2025)](#historical-performance-comparison-19952025)
 - [Bibliography](#bibliography)
 - [Authors](#authors)
 - [Acknowledgements](#acknowledgements)
@@ -112,7 +112,7 @@ CorrelationEquityBond/
 
 ### Diagnostics (`src/.../diagnostics/`)
 
-* `HMMCoherenceChecker.py`: Orchestrates a four-pillar validation (Separability, Stability, Persistence, Confidence). Overall coherence score: **83.1%**.
+* `HMMCoherenceChecker.py`: Orchestrates a four-pillar validation (Separability, Stability, Persistence, Confidence).
 * `TransitionExplainer.py`: **Integrated Gradients (IG)**. Decomposes any transition probability shift into per-covariate macro-contributions (e.g., Inflation, Slope).
 
 ### Strategy (`src/.../strategy/`)
@@ -168,9 +168,9 @@ pip install git+[https://github.com/lindermanlab/ssm.git](https://github.com/lin
 The project is organized in incremental research stages:
 
 * [x] **`01_Descriptive_Research`** — In-sample regime detection and characterization across the three HMM variants.
-* [ ] **`02_OutOfSample_Validation`** — Walk-forward regime probabilities via `GenericHMMBacktester`, stability of the macro-driver attribution.
-* [ ] **`03_Strategy_Backtest`** — Full strategy backtest with `StrategySimulator`, sensitivity to target vol / risk budget bounds / smoothing.
-* [ ] **`04_Robustness`** — Crisis-by-crisis stress tests (Volcker, GFC, COVID, 2022 inflation shock), out-of-sample stability of regime labels.
+* [x] **`02_OutOfSample_Validation`** — Walk-forward regime probabilities via `GenericHMMBacktester`, stability of the macro-driver attribution.
+* [x] **`03_Strategy_Backtest`** — Full strategy backtest with `StrategySimulator`, sensitivity to target vol / risk budget bounds / smoothing.
+* [x] **`04_Robustness`** — Crisis-by-crisis stress tests (Volcker, GFC, COVID, 2022 inflation shock), out-of-sample stability of regime labels.
 
 ## Bibliography
 
