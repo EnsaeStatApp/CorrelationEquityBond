@@ -358,7 +358,16 @@ The `papers/` directory contains the academic and industry literature underpinni
 ENSAE — Statistical Applications team
 [github.com/EnsaeStatApp](https://github.com/EnsaeStatApp)
 
+- Benjamin Benisti
+- Imade Haddadi
+- Marie-Camille Memet
+- Aurele Thinot
+
 For questions, suggestions, or contributions, please open an issue on the repository.
+
+## Acknowledgements
+
+We would like to thank **Loic Brach** (HSBC) for his supervision and guidance throughout this project.
 
 ## License
 
