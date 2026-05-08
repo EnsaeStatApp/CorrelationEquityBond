@@ -5,26 +5,27 @@ from src.stock_bond_correlation.models.base_detector import BaseRegimeDetector
 
 class HMMDetector(BaseRegimeDetector):
     """
-    HMM Gaussien (Classic Hidden Markov Model) basé sur la librairie ssm (Linderman Lab).
+    Gaussian HMM (Classic Hidden Markov Model) based on the ssm library (Linderman Lab).
 
-    Le modèle est fitté sur des variables d'observation (ex: macro standardisées).
-    Les métriques de régime (moyennes, covariances) sont calculées sur les log returns financiers,
-    en mode statique (empirique par état Viterbi) ou dynamique (EWMA pondéré par les probabilités).
+    The model is fitted on observation variables (e.g., standardized macro variables).
+    Regime metrics (means, covariances) are computed on financial log returns,
+    either in static mode (empirical by Viterbi state) or dynamic mode
+    (EWMA weighted by regime probabilities).
 
-    Paramètres
+    Parameters
     ----------
     n_states : int
-        Nombre de régimes latents.
+        Number of latent regimes.
     n_iter : int
-        Nombre d'itérations EM pour l'apprentissage.
+        Number of EM iterations for training.
     random_state : int
-        Graine aléatoire pour la reproductibilité du modèle final.
+        Random seed for reproducibility of the final model.
     kappa : float
-        Force de persistance des régimes (transitions "sticky").
-        0 = transitions standard sans biais, >0 = biais de persistance croissant.
+        Regime persistence strength ("sticky" transitions).
+        0 = standard unbiased transitions, >0 = increasing persistence bias.
     n_restarts : int
-        Nombre de restarts avec initialisation K-Means.
-        Le modèle retenu est celui maximisant la log-vraisemblance.
+        Number of K-Means initialized restarts.
+        The selected model is the one maximizing the log-likelihood.
     """
 
     def __init__(self, n_states: int = 2, n_iter: int = 100, random_state: int = 42,
@@ -32,36 +33,36 @@ class HMMDetector(BaseRegimeDetector):
         self.n_states = n_states
         self.n_iter = n_iter
         self.random_state = random_state
-        self.seed = random_state            # alias conservé pour compatibilité interne
+        self.seed = random_state            # alias kept for internal compatibility
         self.kappa = kappa
         self.n_restarts = n_restarts
 
-        # Attributs d'interface attendus par TransitionStatisticalAnalyzer / CoherenceChecker
-        self.K = n_states                   # nombre de régimes (alias de n_states)
-        self.D = None                       # dimension des observations (fixée au fit)
-        self.M = 0                          # nombre d'inputs covariables (0 = HMM non-conditionnel)
+        # Interface attributes expected by TransitionStatisticalAnalyzer / CoherenceChecker
+        self.K = n_states                   # number of regimes (alias of n_states)
+        self.D = None                       # observation dimension (set during fit)
+        self.M = 0                          # number of covariate inputs (0 = unconditional HMM)
 
         self.model = None
-        self.is_fitted = False              # booléen simple, mis à True dans fit()
-        self._fitted_probs = None           # Cache des probabilités lissées (in-sample)
-        self.viterbi_states = None          # Séquence d'états la plus probable (Viterbi)
-        self._observations_fitted = None    # Observations d'entraînement (ex: macro)
-        self._log_returns_fitted = None     # Log returns financiers alignés sur le fit
-        self.fit_observations = None        # Alias liste-wrappé attendu par TransitionStatisticalAnalyzer
-        self.fit_input = None               # Inputs covariables (None pour HMM non-conditionnel)
+        self.is_fitted = False              # simple boolean, set to True in fit()
+        self._fitted_probs = None           # cache of smoothed probabilities (in-sample)
+        self.viterbi_states = None          # most likely state sequence (Viterbi)
+        self._observations_fitted = None    # training observations (e.g., macro variables)
+        self._log_returns_fitted = None     # financial log returns aligned with fit
+        self.fit_observations = None        # list-wrapped alias expected by TransitionStatisticalAnalyzer
+        self.fit_input = None               # covariate inputs (None for unconditional HMM)
 
     # ------------------------------------------------------------------
-    # Méthode privée : instanciation du modèle SSM
+    # Private method: instantiate SSM model
     # ------------------------------------------------------------------
 
     def _build_model(self, D: int):
         """
-        Instancie un HMM ssm selon la configuration de l'objet.
+        Instantiates an ssm HMM according to the object's configuration.
 
-        Paramètres
+        Parameters
         ----------
         D : int
-            Dimension des observations.
+            Observation dimension.
         """
         if self.kappa > 0:
             return ssm.HMM(
@@ -73,19 +74,19 @@ class HMMDetector(BaseRegimeDetector):
         return ssm.HMM(self.n_states, D, observations="gaussian")
 
     # ------------------------------------------------------------------
-    # Méthode privée : résolution des log returns
+    # Private method: resolve log returns
     # ------------------------------------------------------------------
 
     def _resolve_log_returns(self, log_returns: np.ndarray = None) -> np.ndarray:
         """
-        Résout les log returns à utiliser : argument explicite ou cache du fit.
+        Resolves the log returns to use: explicit argument or fitted cache.
 
-        Paramètres
+        Parameters
         ----------
-        log_returns : np.ndarray ou None
+        log_returns : np.ndarray or None
 
-        Retourne
-        --------
+        Returns
+        -------
         np.ndarray (T, D)
         """
         if log_returns is not None:
@@ -93,40 +94,40 @@ class HMMDetector(BaseRegimeDetector):
         if self._log_returns_fitted is not None:
             return self._log_returns_fitted
         raise ValueError(
-            "Aucun log_returns disponible. "
-            "Passez log_returns au fit() ou directement à cette méthode."
+            "No log_returns available. "
+            "Pass log_returns to fit() or directly to this method."
         )
 
     # ------------------------------------------------------------------
-    # Méthode privée : calcul des poids EWMA
+    # Private method: compute EWMA weights
     # ------------------------------------------------------------------
 
     def _ewma_weights(self, t: int, regime_probs: np.ndarray, halflife: int) -> np.ndarray:
         """
-        Calcule les poids EWMA combinés pour le régime k jusqu'à l'instant t.
+        Computes combined EWMA weights for regime k up to time t.
 
-        Poids = décroissance exponentielle × probabilité d'être dans le régime k.
+        Weights = exponential decay × probability of being in regime k.
 
-        Paramètres
+        Parameters
         ----------
         t : int
-            Instant courant (exclusif).
+            Current time step (exclusive).
         regime_probs : np.ndarray (t, K)
-            Probabilités de régime jusqu'à t.
+            Regime probabilities up to t.
         halflife : int
-            Demi-vie en mois pour la décroissance EWMA.
+            Half-life in months for EWMA decay.
 
-        Retourne
-        --------
-        np.ndarray (t, K) : poids normalisés pour chaque régime.
+        Returns
+        -------
+        np.ndarray (t, K): normalized weights for each regime.
         """
         alpha = 1 - np.exp(-np.log(2) / halflife)
         decay = np.array([(1 - alpha) ** i for i in range(t)])[::-1]  # (t,)
 
-        # Poids combinés : décroissance × probabilité de régime
+        # Combined weights: decay × regime probability
         w = decay[:, None] * regime_probs[:t]  # (t, K)
 
-        # Normalisation par régime
+        # Regime-wise normalization
         w_sum = w.sum(axis=0, keepdims=True)  # (1, K)
         w_sum = np.where(w_sum < 1e-8, 1.0, w_sum)
         return w / w_sum  # (t, K)
@@ -137,28 +138,28 @@ class HMMDetector(BaseRegimeDetector):
 
     def fit(self, observations, inputs=None, log_returns=None):
         """
-        Entraîne le HMM sur les observations via l'algorithme EM avec initialisation K-Means.
+        Trains the HMM on observations using the EM algorithm with K-Means initialization.
 
-        Effectue n_restarts runs indépendants et retient le modèle maximisant
-        la log-vraisemblance pour éviter les optima locaux.
+        Performs n_restarts independent runs and retains the model maximizing
+        the log-likelihood in order to avoid local optima.
 
-        Paramètres
+        Parameters
         ----------
-        observations : List[np.ndarray] ou np.ndarray
-            Variables d'observation du HMM (ex : macro standardisées).
-            Accepte une liste de la forme [obs_array] ou un tableau (T, D).
-            Si une liste est fournie, observations[0] est utilisé pour le fit
-            et observations[1] (si présent) est stocké comme log_returns financiers.
-        inputs : ignoré
-            HMMDetector est un modèle non-conditionnel sur les transitions.
-        log_returns : List[np.ndarray] ou np.ndarray, optionnel
-            Log returns financiers alignés sur observations.
-            Stockés pour le calcul des métriques de régime (moyennes, covariances).
-            Prioritaire sur observations[1] si les deux sont fournis.
+        observations : List[np.ndarray] or np.ndarray
+            HMM observation variables (e.g., standardized macro variables).
+            Accepts either a list of the form [obs_array] or an array (T, D).
+            If a list is provided, observations[0] is used for fitting
+            and observations[1] (if present) is stored as financial log returns.
+        inputs : ignored
+            HMMDetector is an unconditional transition model.
+        log_returns : List[np.ndarray] or np.ndarray, optional
+            Financial log returns aligned with observations.
+            Stored for regime metric computation (means, covariances).
+            Takes precedence over observations[1] if both are provided.
         """
-        # Extraction si format liste :
-        # observations[0] → données du fit HMM
-        # observations[1] → log returns financiers (optionnel, si log_returns non fourni)
+        # Extraction if list format:
+        # observations[0] → HMM fit data
+        # observations[1] → financial log returns (optional, if log_returns not provided)
         if isinstance(observations, list):
             if log_returns is None and len(observations) > 1:
                 log_returns = observations[1]
@@ -167,7 +168,7 @@ class HMMDetector(BaseRegimeDetector):
         if observations.ndim == 1:
             observations = observations[:, None]
 
-        # Stockage des log returns financiers si fournis
+        # Store financial log returns if provided
         if log_returns is not None:
             lr = log_returns[0] if isinstance(log_returns, list) else log_returns
             self._log_returns_fitted = np.array(lr, dtype=float)
@@ -176,7 +177,7 @@ class HMMDetector(BaseRegimeDetector):
 
         T, D = observations.shape
 
-        # Multi-restart K-Means : on retient le modèle avec la meilleure log-vraisemblance
+        # Multi-restart K-Means: retain the model with highest log-likelihood
         best_ll = -np.inf
 
         for seed in range(self.n_restarts):
@@ -189,17 +190,17 @@ class HMMDetector(BaseRegimeDetector):
                 best_ll = ll
                 self.model = candidate
 
-        # Probabilités lissées P(z_t | Y_{1:T}) via Forward-Backward
+        # Smoothed probabilities P(z_t | Y_{1:T}) via Forward-Backward
         self._fitted_probs = self.model.expected_states(observations)[0]
 
-        # Séquence optimale d'états via l'algorithme de Viterbi
+        # Optimal state sequence via the Viterbi algorithm
         self.viterbi_states = self.model.most_likely_states(observations)
 
         self._observations_fitted = observations
-        self.fit_observations = [observations]  # format liste attendu par TransitionStatisticalAnalyzer
-        self.fit_input = None                    # HMM non-conditionnel : pas d'inputs
-        self.D = D          # dimension des observations (disponible post-fit)
-        self.K = self.n_states  # redondant mais garantit la cohérence si n_states change
+        self.fit_observations = [observations]  # list format expected by TransitionStatisticalAnalyzer
+        self.fit_input = None                    # unconditional HMM: no inputs
+        self.D = D          # observation dimension (available post-fit)
+        self.K = self.n_states  # redundant but ensures consistency if n_states changes
         self.is_fitted = True
         return self
 
@@ -209,54 +210,54 @@ class HMMDetector(BaseRegimeDetector):
 
     def regime_probabilities(self, series_index: int = 0) -> np.ndarray:
         """
-        Retourne les probabilités lissées P(z_t | Y_{1:T}) in-sample — shape (T, K).
+        Returns in-sample smoothed probabilities P(z_t | Y_{1:T}) — shape (T, K).
 
-        Paramètres
+        Parameters
         ----------
-        series_index : ignoré (conservé pour compatibilité avec le contrat abstrait).
+        series_index : ignored (kept for compatibility with abstract contract).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
         return self._fitted_probs
 
     # ------------------------------------------------------------------
-    # regime_covariances — statique ou dynamique EWMA
+    # regime_covariances — static or dynamic EWMA
     # ------------------------------------------------------------------
 
     def regime_covariances(self, log_returns: np.ndarray = None,
                            use_ewma: bool = True,
                            halflife: int = 60):
         """
-        Retourne les matrices de covariance des log returns par régime.
+        Returns regime covariance matrices of log returns.
 
-        Mode statique (use_ewma=False) :
-            Covariances empiriques fixes par état Viterbi — shape (K, D, D).
-            Cas statique au sens de base.py : paramètres fixes estimés lors du fit.
+        Static mode (use_ewma=False):
+            Fixed empirical covariances by Viterbi state — shape (K, D, D).
+            Static case in the sense of base.py: fixed parameters estimated during fit.
 
-        Mode dynamique EWMA (use_ewma=True) :
-            Covariances EWMA pondérées par les probabilités de régime — shape (T, K, D, D).
-            Cas dynamique au sens de base.py : séquence temporelle des matrices.
-            Chaque matrice C[t, k] est estimée sur l'historique jusqu'à t,
-            pondéré exponentiellement et par P(z_t = k).
+        Dynamic EWMA mode (use_ewma=True):
+            EWMA covariances weighted by regime probabilities — shape (T, K, D, D).
+            Dynamic case in the sense of base.py: time sequence of matrices.
+            Each matrix C[t, k] is estimated on the history up to t,
+            exponentially weighted and weighted by P(z_t = k).
 
-        Paramètres
+        Parameters
         ----------
-        log_returns : np.ndarray, optionnel (T, D)
-            Log returns financiers. Si None, utilise ceux stockés lors du fit.
+        log_returns : np.ndarray, optional (T, D)
+            Financial log returns. If None, uses those stored during fit.
         use_ewma : bool
-            True → mode dynamique EWMA, False → mode statique empirique.
+            True → dynamic EWMA mode, False → empirical static mode.
         halflife : int
-            Demi-vie en mois pour la décroissance EWMA (utilisé si use_ewma=True).
+            Half-life in months for EWMA decay (used if use_ewma=True).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
 
         lr = self._resolve_log_returns(log_returns)
         T, D = lr.shape
         K = self.n_states
 
         if not use_ewma:
-            # Mode statique : covariance empirique par état Viterbi
+            # Static mode: empirical covariance by Viterbi state
             covs = []
             for k in range(K):
                 mask = (self.viterbi_states == k)
@@ -264,7 +265,7 @@ class HMMDetector(BaseRegimeDetector):
                 covs.append(np.cov(subset.T, ddof=1) if subset.shape[0] >= 2 else np.eye(D))
             return covs
 
-        # Mode dynamique EWMA — shape (T, K, D, D)
+        # Dynamic EWMA mode — shape (T, K, D, D)
         covs_dynamic = np.zeros((T, K, D, D))
 
         for t in range(1, T):
@@ -273,49 +274,49 @@ class HMMDetector(BaseRegimeDetector):
             for k in range(K):
                 w_k = w[:, k]  # (t,)
 
-                # Moyenne pondérée
+                # Weighted mean
                 mu_k = (lr[:t] * w_k[:, None]).sum(axis=0)
 
-                # Covariance pondérée
+                # Weighted covariance
                 diff = lr[:t] - mu_k
                 covs_dynamic[t, k] = (diff * w_k[:, None]).T @ diff
 
         return covs_dynamic
 
     # ------------------------------------------------------------------
-    # regime_means — statique ou dynamique EWMA
+    # regime_means — static or dynamic EWMA
     # ------------------------------------------------------------------
 
     def regime_means(self, log_returns: np.ndarray = None,
                      use_ewma: bool = True,
                      halflife: int = 24):
         """
-        Retourne les moyennes des log returns par régime.
+        Returns regime means of log returns.
 
-        Mode statique (use_ewma=False) :
-            Moyennes empiriques fixes par état Viterbi — shape (K, D).
+        Static mode (use_ewma=False):
+            Fixed empirical means by Viterbi state — shape (K, D).
 
-        Mode dynamique EWMA (use_ewma=True) :
-            Moyennes EWMA pondérées par les probabilités de régime — shape (T, K, D).
+        Dynamic EWMA mode (use_ewma=True):
+            EWMA means weighted by regime probabilities — shape (T, K, D).
 
-        Paramètres
+        Parameters
         ----------
-        log_returns : np.ndarray, optionnel (T, D)
-            Log returns financiers. Si None, utilise ceux stockés lors du fit.
+        log_returns : np.ndarray, optional (T, D)
+            Financial log returns. If None, uses those stored during fit.
         use_ewma : bool
-            True → mode dynamique EWMA, False → mode statique empirique.
+            True → dynamic EWMA mode, False → empirical static mode.
         halflife : int
-            Demi-vie en mois pour la décroissance EWMA (utilisé si use_ewma=True).
+            Half-life in months for EWMA decay (used if use_ewma=True).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
 
         lr = self._resolve_log_returns(log_returns)
         T, D = lr.shape
         K = self.n_states
 
         if not use_ewma:
-            # Mode statique : moyenne empirique par état Viterbi
+            # Static mode: empirical mean by Viterbi state
             means = []
             for k in range(K):
                 mask = (self.viterbi_states == k)
@@ -323,7 +324,7 @@ class HMMDetector(BaseRegimeDetector):
                 means.append(np.mean(subset, axis=0) if subset.shape[0] > 0 else np.zeros(D))
             return means
 
-        # Mode dynamique EWMA — shape (T, K, D)
+        # Dynamic EWMA mode — shape (T, K, D)
         means_dynamic = np.zeros((T, K, D))
 
         for t in range(1, T):
@@ -336,23 +337,23 @@ class HMMDetector(BaseRegimeDetector):
         return means_dynamic
 
     # ------------------------------------------------------------------
-    # conditional_covariance — délégation à BaseRegimeDetector
+    # conditional_covariance — delegation to BaseRegimeDetector
     # ------------------------------------------------------------------
 
     def conditional_covariance(self, probs: np.ndarray,
                                 log_returns: np.ndarray = None) -> np.ndarray:
         """
-        Calcule la covariance conditionnelle totale via la loi des covariances totales.
+        Computes total conditional covariance via the law of total covariance.
 
-        Délègue à BaseRegimeDetector.conditional_covariance en lui fournissant
-        les métriques de régime calculées sur les log returns.
+        Delegates to BaseRegimeDetector.conditional_covariance while providing
+        regime metrics computed on log returns.
 
-        Paramètres
+        Parameters
         ----------
         probs : np.ndarray (T, K)
-            Probabilités de régime à chaque date.
-        log_returns : np.ndarray, optionnel
-            Log returns financiers (T, D). Si None, utilise ceux stockés lors du fit.
+            Regime probabilities at each date.
+        log_returns : np.ndarray, optional
+            Financial log returns (T, D). If None, uses those stored during fit.
         """
         lr = self._resolve_log_returns(log_returns)
         return super().conditional_covariance(probs=probs, log_returns=lr)
@@ -364,26 +365,26 @@ class HMMDetector(BaseRegimeDetector):
     def predict_probabilities(self, observations: np.ndarray, inputs: np.ndarray = None,
                               oos_start: int = 0, oos_end: int = None) -> np.ndarray:
         """
-        Calcule les probabilités prédictives causales P(z_t | Y_{1:t-1}) sur l'OOS.
+        Computes causal predictive probabilities P(z_t | Y_{1:t-1}) on OOS data.
 
-        Utilise le filtrage Forward (causal) — pas de look-ahead bias.
+        Uses Forward filtering (causal) — no look-ahead bias.
 
-        Paramètres
+        Parameters
         ----------
         observations : np.ndarray
-            Observations complètes in-sample + OOS (T_total, D).
-        inputs : ignoré
+            Full in-sample + OOS observations (T_total, D).
+        inputs : ignored
         oos_start : int
-            Indice de début de l'OOS dans observations.
-        oos_end : int, optionnel
-            Indice de fin de l'OOS. Si None, va jusqu'à la fin.
+            OOS start index in observations.
+        oos_end : int, optional
+            OOS end index. If None, goes until the end.
 
-        Retourne
-        --------
-        np.ndarray (T_oos, K) : probabilités prédictives sur l'OOS uniquement.
+        Returns
+        -------
+        np.ndarray (T_oos, K): predictive probabilities on OOS only.
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
 
         observations = np.array(observations, dtype=float)
         if observations.ndim == 1:
@@ -392,10 +393,10 @@ class HMMDetector(BaseRegimeDetector):
         if oos_end is None:
             oos_end = len(observations)
 
-        # Filtrage causal sur toute la séquence (in-sample + OOS pour contexte)
+        # Causal filtering on full sequence (in-sample + OOS for context)
         _, filtered = self.model.filter(observations)
 
-        # On ne retourne que les probabilités filtrées sur l'OOS
+        # Return only filtered probabilities on OOS
         return filtered[oos_start:oos_end]
 
     # ------------------------------------------------------------------
@@ -404,27 +405,27 @@ class HMMDetector(BaseRegimeDetector):
 
     def get_transition_matrix(self) -> np.ndarray:
         """
-        Retourne la matrice de transition stochastique A (K, K),
-        où A[i, j] = P(z_{t+1} = j | z_t = i).
+        Returns the stochastic transition matrix A (K, K),
+        where A[i, j] = P(z_{t+1} = j | z_t = i).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
         return np.exp(self.model.transitions.log_Ps)
 
     def get_transition_matrices(self, inputs=None) -> np.ndarray:
         """
-        Retourne la séquence de matrices de transition — shape (T, K, K).
+        Returns the sequence of transition matrices — shape (T, K, K).
 
-        Pour un HMM standard (non-conditionnel), la matrice est constante :
-        la même matrice (K, K) est répétée T fois. Si inputs est fourni,
-        T est inféré de sa longueur, sinon depuis les observations du fit.
+        For a standard (unconditional) HMM, the matrix is constant:
+        the same matrix (K, K) is repeated T times. If inputs are provided,
+        T is inferred from their length, otherwise from fitted observations.
 
-        Paramètres
+        Parameters
         ----------
-        inputs : np.ndarray (T, M) ou None — ignoré pour un HMM non-conditionnel.
+        inputs : np.ndarray (T, M) or None — ignored for an unconditional HMM.
 
-        Retourne
-        --------
+        Returns
+        -------
         np.ndarray (T, K, K)
         """
         A = self.get_transition_matrix()  # (K, K)
@@ -433,114 +434,116 @@ class HMMDetector(BaseRegimeDetector):
         elif self._observations_fitted is not None:
             T = self._observations_fitted.shape[0]
         else:
-            raise ValueError("Impossible d'inférer T : passez inputs ou appelez fit() d'abord.")
+            raise ValueError("Unable to infer T: pass inputs or call fit() first.")
         return np.tile(A, (T, 1, 1))  # (T, K, K)
 
     # ------------------------------------------------------------------
     # get_transition_params / set_transition_params
-    # Requis par TransitionStatisticalAnalyzer (save → perturb → restore)
+    # Required by TransitionStatisticalAnalyzer (save → perturb → restore)
     # ------------------------------------------------------------------
 
     def get_transition_params(self):
         """
-        Retourne les paramètres bruts de transition pour sauvegarde.
+        Returns raw transition parameters for backup.
 
-        Pour un HMM standard (non-conditionnel), seuls les log-probabilités
-        de transition log_Ps sont des paramètres libres. Ws est retourné comme
-        un array vide de shape (K, 0) — sans covariables — pour rester compatible
-        avec TransitionStatisticalAnalyzer qui suppose toujours un array indexable.
+        For a standard (unconditional) HMM, only transition log-probabilities
+        log_Ps are free parameters. Ws is returned as
+        an empty array of shape (K, 0) — without covariates — to remain compatible
+        with TransitionStatisticalAnalyzer, which always assumes an indexable array.
 
-        Retourne
-        --------
-        log_Ps : np.ndarray (K, K) — copie des log-probabilités de transition.
-        Ws     : np.ndarray (K, 0) — array vide (pas de covariables).
+        Returns
+        -------
+        log_Ps : np.ndarray (K, K) — copy of transition log-probabilities.
+        Ws     : np.ndarray (K, 0) — empty array (no covariates).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
         log_Ps = self.model.transitions.log_Ps.copy()
-        Ws = np.zeros((self.K, 0))   # (K, M=0) : compatible avec toutes les ops array
+        Ws = np.zeros((self.K, 0))   # (K, M=0): compatible with all array ops
         return log_Ps, Ws
 
     def set_transition_params(self, log_Ps: np.ndarray, Ws=None):
         """
-        Restaure les paramètres de transition (après perturbation numérique).
+        Restores transition parameters (after numerical perturbation).
 
-        Paramètres
+        Parameters
         ----------
-        log_Ps : np.ndarray (K, K) — log-probabilités de transition à restaurer.
-        Ws     : ignoré (pas de covariables dans un HMM standard).
+        log_Ps : np.ndarray (K, K) — transition log-probabilities to restore.
+        Ws     : ignored (no covariates in a standard HMM).
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
         self.model.transitions.log_Ps = log_Ps.copy()
 
     def update_transition_params(self, log_Ps: np.ndarray, Ws=None):
         """
-        Alias de set_transition_params — utilisé par TransitionStatisticalAnalyzer
-        lors des perturbations numériques pour le calcul de la Hessienne.
+        Alias of set_transition_params — used by TransitionStatisticalAnalyzer
+        during numerical perturbations for Hessian computation.
 
-        Paramètres
+        Parameters
         ----------
-        log_Ps : np.ndarray (K, K) — log-probabilités de transition mises à jour.
-        Ws     : ignoré (pas de covariables dans un HMM standard).
+        log_Ps : np.ndarray (K, K) — updated transition log-probabilities.
+        Ws     : ignored (no covariates in a standard HMM).
         """
         self.set_transition_params(log_Ps, Ws)
 
     def compute_ll(self, observations_list, inputs_list=None) -> float:
         """
-        Calcule la log-vraisemblance du modèle sur les observations fournies.
+        Computes model log-likelihood on the provided observations.
 
-        Utilisé par TransitionStatisticalAnalyzer pour évaluer la LL après
-        perturbation des paramètres de transition (calcul numérique de la Hessienne).
+        Used by TransitionStatisticalAnalyzer to evaluate the LL after
+        perturbation of transition parameters (numerical Hessian computation).
 
-        Paramètres
+        Parameters
         ----------
         observations_list : list[np.ndarray]
-            Liste contenant un array d'observations (T, D).
-        inputs_list : ignoré — HMM non-conditionnel.
+            List containing an observation array (T, D).
+        inputs_list : ignored — unconditional HMM.
 
-        Retourne
-        --------
-        float : log-vraisemblance du modèle.
+        Returns
+        -------
+        float : model log-likelihood.
         """
         if self.model is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
         obs = np.array(observations_list[0], dtype=float)
         if obs.ndim == 1:
             obs = obs[:, None]
         return self.model.log_probability(obs)
 
     # ------------------------------------------------------------------
-    # compute_confidence_index — requise par HMMCoherenceChecker
+    # compute_confidence_index — required by HMMCoherenceChecker
     # ------------------------------------------------------------------
 
     def compute_confidence_index(self, series_index: int = 0) -> np.ndarray:
         """
-        Calcule l'indice de confiance à chaque pas de temps comme (1 - entropie normalisée).
+        Computes the confidence index at each time step as
+        (1 - normalized entropy).
 
-        Une valeur proche de 1 indique que le modèle est très certain du régime courant
-        (une probabilité domine). Une valeur proche de 0 indique une forte ambiguïté.
+        A value close to 1 indicates that the model is highly certain
+        about the current regime (one probability dominates).
+        A value close to 0 indicates strong ambiguity.
 
-        Paramètres
+        Parameters
         ----------
         series_index : int
-            Ignoré — conservé pour compatibilité avec le contrat BaseRegimeDetector.
+            Ignored — kept for compatibility with BaseRegimeDetector contract.
 
-        Retourne
-        --------
-        np.ndarray (T,) : indice de confiance ∈ [0, 1] pour chaque date.
+        Returns
+        -------
+        np.ndarray (T,) : confidence index ∈ [0, 1] for each date.
         """
         if self._fitted_probs is None:
-            raise ValueError("Le modèle n'a pas été entraîné.")
+            raise ValueError("The model has not been trained.")
 
         probs = self._fitted_probs  # (T, K)
         K = probs.shape[1]
 
-        # Entropie de Shannon normalisée : H ∈ [0, 1]
-        # On clip pour éviter log(0)
+        # Normalized Shannon entropy: H ∈ [0, 1]
+        # Clip to avoid log(0)
         log_probs = np.log(np.clip(probs, 1e-12, 1.0))
         entropy = -np.sum(probs * log_probs, axis=1)          # (T,)
-        max_entropy = np.log(K)                                # entropie max = log(K) (uniforme)
+        max_entropy = np.log(K)                                # max entropy = log(K) (uniform)
         normalized_entropy = entropy / max_entropy             # (T,) ∈ [0, 1]
 
         return 1.0 - normalized_entropy                        # (T,) ∈ [0, 1]
