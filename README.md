@@ -1,4 +1,4 @@
-# Equity–Bond Correlation under Macroeconomic Regimes
+# Macro-Conditional Market Regimes and the Dynamics of Stock–Bond Correlation
 
 **A regime detection, diagnostics, and allocation framework — 1970–2025**
 
