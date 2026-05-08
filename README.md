@@ -21,10 +21,14 @@
 - [Module Reference](#module-reference)
 - [Data](#data)
 - [Installation](#installation)
+- [Roadmap](#roadmap)
 - [Validation Framework](#validation-framework)
 - [Allocation Strategy](#allocation-strategy)
-- [Historical Performance Comparison (1995–2025)](#historical-performance-comparison-19952025)
+- [Historical Performance Comparison (1995–2025)](#historical-performance-comparison-1995-2025)
+- [Bibliography](#bibliography)
 - [Authors](#authors)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ---
 
@@ -125,6 +129,20 @@ We enforce a **four-pillar validation protocol**:
 3. **Persistence**: Average regime duration (must be > 3 months).
 4. **Confidence**: Average Viterbi posterior certainty (1 - Entropy).
 
+The final coherence score is calculated as follows:
+
+
+$$ \text{score} = 0.30 \cdot s_{\text{sep}} + 0.20 \cdot s_{\text{stab}} + 0.20 \cdot s_{\text{pers}} + 0.30 \cdot s_{\text{conf}} $$
+
+## Allocation Strategy
+
+The `StrategySimulator` translates regime probabilities into monthly portfolio weights through a layered decision logic:
+
+1. **Stress regime detection.** Identification of the state with positive stock-bond correlation and high volatility.
+2. **Dynamic risk budget.** The equity risk budget shrinks linearly as the danger score of the current regime increases.
+3. **Volatility targeting.** Per-regime leverage adjusted to hit target volatility, with specific caps for stress periods.
+4. **Probability blending.** Final weights are calculated as the regime-probability-weighted average of per-regime allocations.
+
 ## Historical Performance Comparison (1995–2025)
 
 | **Metric** | **HMM TVTP (Strategy)** | **Rolling Risk Parity** | **Benchmark 60/40** |
@@ -145,6 +163,55 @@ pip install git+[https://github.com/lindermanlab/ssm.git](https://github.com/lin
 
 ```
 
+## Roadmap
+
+The project is organized in incremental research stages:
+
+* [x] **`01_Descriptive_Research`** — In-sample regime detection and characterization across the three HMM variants.
+* [ ] **`02_OutOfSample_Validation`** — Walk-forward regime probabilities via `GenericHMMBacktester`, stability of the macro-driver attribution.
+* [ ] **`03_Strategy_Backtest`** — Full strategy backtest with `StrategySimulator`, sensitivity to target vol / risk budget bounds / smoothing.
+* [ ] **`04_Robustness`** — Crisis-by-crisis stress tests (Volcker, GFC, COVID, 2022 inflation shock), out-of-sample stability of regime labels.
+
+## Bibliography
+
+### 1. Dynamics of Stock–Bond Correlation
+
+* **ASNESS, C., et al. (2021).** *The Stock–Bond Correlation.* Journal of Portfolio Management.
+* **HSBC Global Research (2023).** *A Changing Stock–Bond Correlation: Drivers and Implications.*
+* **ILMANEN, A. (2003).** *Stock-Bond Correlations.* Journal of Fixed Income.
+
+### 2. Regime-Switching Models (HMM)
+
+* **HAMILTON, J. D. (1989).** *A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle.* Econometrica.
+* **ANG, A., & BEKAERT, G. (2002).** *International Asset Allocation with Regime Shifts.* Review of Financial Studies.
+* **DIEBOLD, F. X., et al. (1994).** *Regime Switching with Time-Varying Transition Probabilities.*
+
+### 3. Explainability & Attribution
+
+* **SUNDARARAJAN, M., et al. (2017).** *Axiomatic Attribution for Deep Networks.* ICML.
+* **SHAPLEY, L. S. (1953).** *A Value for n-person Games.*
+
+### 4. Portfolio Engineering & Risk Budgeting
+
+* **SPINU, F. (2013).** *An Algorithm for Computing Risk Parity Weights.*
+* **MAILLARD, S., et al. (2010).** *The Properties of Equally Weighted Risk Contribution Portfolios.* Journal of Portfolio Management.
+
+### 5. Technical Documentation & Data
+
+* **LINDERMAN, S., et al.** *SSM: Bayesian Learning and Inference for State Space Models.* [GitHub](https://github.com/lindermanlab/ssm).
+* **Federal Reserve Bank of St. Louis.** *FRED Economic Data.* [fred.stlouisfed.org](https://fred.stlouisfed.org).
+
+### Software
+
+* Linderman, S. et al. **SSM: Bayesian Learning and Inference for State Space Models.** [github.com/lindermanlab/ssm](https://github.com/lindermanlab/ssm)
+* Sundararajan, M., Taly, A., & Yan, Q. (2017). *Axiomatic Attribution for Deep Networks* — basis for the Integrated Gradients implementation in `TransitionExplainer`.
+* Spinu, F. (2013). *An Algorithm for Computing Risk Parity Weights* — basis for `RiskBudgetingAllocator`.
+
+### Data
+
+* Federal Reserve Bank of St. Louis. **FRED Economic Data.** [fred.stlouisfed.org](https://fred.stlouisfed.org)
+* Online Data: U.S. Stock Price, Earnings, and Dividends (since 1871). [econ.yale.edu](http://www.econ.yale.edu/~shiller/data.htm)
+
 ## Authors
 
 **ENSAE — Statistical Applications Team**
@@ -156,4 +223,9 @@ pip install git+[https://github.com/lindermanlab/ssm.git](https://github.com/lin
 
 ## Acknowledgements
 
-We would like to thank **Loic Brach** (HSBC) for his supervision and guidance throughout this project.
+We would like to thank **Loïc Brach** (HSBC) for his supervision and guidance throughout this project.
+
+## License
+
+This project is released for academic and research purposes. Please refer to the `LICENSE` file for full usage terms.
+
